@@ -1,0 +1,12 @@
+[gd_scene load_steps=4 format=3 uid="uid://dvw0upwegu623"]
+
+[ext_resource type="Script" uid="uid://b2bocy2vvvers" path="res://Maumau/manager.gd" id="1_j8plu"]
+[ext_resource type="PackedScene" uid="uid://bkpjlq7ggckg6" path="res://addons/card-framework/hand.tscn" id="2_xx6jl"]
+[ext_resource type="PackedScene" uid="uid://c7u8hryloq7hy" path="res://addons/card-framework/card_manager.tscn" id="3_m35op"]
+
+[node name="Manager" type="Node"]
+script = ExtResource("1_j8plu")
+num_players = 4
+hand_scene = ExtResource("2_xx6jl")
+
+[node name="CardManager" parent="." instance=ExtResource("3_m35op")]

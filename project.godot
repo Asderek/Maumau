@@ -11,8 +11,8 @@ config_version=5
 [application]
 
 config/name="CardFramework"
-run/main_scene="res://freecell/scenes/menu/menu.tscn"
-config/features=PackedStringArray("4.4", "Forward Plus")
+run/main_scene="uid://60bwveuu2rt"
+config/features=PackedStringArray("4.5", "Forward Plus")
 
 [display]
 

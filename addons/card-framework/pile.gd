@@ -72,7 +72,6 @@ func get_top_cards(n: int) -> Array:
 	
 	return result
 
-
 ## Updates z-index values for all cards to maintain proper layering.
 ## Pressed cards receive elevated z-index to appear above the pile.
 func _update_target_z_index() -> void:
@@ -82,7 +81,6 @@ func _update_target_z_index() -> void:
 			card.stored_z_index = CardFrameworkSettings.VISUAL_PILE_Z_INDEX + i
 		else:
 			card.stored_z_index = i
-
 
 ## Updates visual positions and interaction states for all cards in the pile.
 ## Positions cards according to layout direction and applies interaction restrictions.
@@ -125,7 +123,7 @@ func _update_target_positions() -> void:
 func _calculate_offset(index: int) -> Vector2:
 	# Clamp to maximum display limit to prevent visual overflow
 	var actual_index = min(index, max_stack_display - 1)
-	var offset_value = actual_index * stack_display_gap
+	var offset_value = actual_index * (stack_display_gap)
 	var offset = Vector2()
 
 	# Apply directional offset based on pile layout
