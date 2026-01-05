@@ -9,22 +9,28 @@ func _card_can_be_added(_cards: Array) -> bool:
 	print(_cards[0].card_info["suit"]);
 	
 	if(len(top) <= 0):
-		Alert.text = "pode ser qqr carta, suave";
+		if(Alert):
+			Alert.text = "pode ser qqr carta, suave";
 		return true;
 		
 	if(len(_cards) > 1):
-		Alert.text = "como diabos voce chegou aqui?";
+		if(Alert):
+			Alert.text = "como diabos voce chegou aqui?";
 		return false
 	
 	if(top[0].card_info["suit"] == _cards[0].card_info["suit"]):
-		Alert.text = "de boas, naipes iguais";
+		if(Alert):
+			Alert.text = "de boas, naipes iguais";
 		return true;
 	
 	if(top[0].card_info["value"] == _cards[0].card_info["value"]):
-		Alert.text = "De boa, valores iguais	";
+		if(Alert):
+			Alert.text = "De boa, valores iguais	";
 		return true;
 		
-	Alert.text = "jogada invalida";
+		
+	if(Alert):
+		Alert.text = "jogada invalida";
 	return false;
 
 ## Updates visual positions and interaction states for all cards in the pile.

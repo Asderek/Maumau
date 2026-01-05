@@ -12,3 +12,10 @@ hand_scene = ExtResource("2_xx6jl")
 
 [node name="CardManager" parent="." instance=ExtResource("3_m35op")]
 card_factory_scene = ExtResource("4_yvypw")
+
+[node name="Alert" type="Label" parent="CardManager"]
+layout_mode = 0
+offset_left = 500.0
+offset_top = 62.0
+offset_right = 540.0
+offset_bottom = 85.0
