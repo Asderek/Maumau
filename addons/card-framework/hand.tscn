@@ -19,3 +19,9 @@ mouse_filter = 1
 script = ExtResource("1_hrxjc")
 hand_rotation_curve = SubResource("Curve_lsli3")
 hand_vertical_curve = SubResource("Curve_8dbo5")
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+text = "Hand"
