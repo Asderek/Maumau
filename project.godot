@@ -11,14 +11,13 @@ config_version=5
 [application]
 
 config/name="CardFramework"
-run/main_scene="uid://60bwveuu2rt"
+run/main_scene="uid://dvw0upwegu623"
 config/features=PackedStringArray("4.5", "Forward Plus")
 
 [display]
 
-window/size/viewport_width=1920
-window/size/viewport_height=1080
-window/size/mode=4
+window/size/viewport_width=1366
+window/size/viewport_height=768
 window/stretch/mode="viewport"
 
 [dotnet]

@@ -49,7 +49,6 @@ var history: Array[HistoryElement] = []
 func _init() -> void:
 	if Engine.is_editor_hint():
 		return
-	
 
 func _ready() -> void:
 	if not _pre_process_exported_variables():
@@ -114,6 +113,8 @@ func _on_drag_dropped(cards: Array) -> void:
 		# Restore mouse_filter before return_card (DraggableObject will manage it from here)
 		card.mouse_filter = original_mouse_filters[card]
 		card.return_card()
+		
+	
 
 
 func _add_history(to: CardContainer, cards: Array) -> void:

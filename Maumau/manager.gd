@@ -65,12 +65,17 @@ func setup_game() -> void:
 			1: # Left
 				hand.position = Vector2(100, screen_size.y / 2)
 				hand.rotation = deg_to_rad(90)
+				for card in hand._held_cards:
+					card.rotation_degrees = 0
+				
 			2: # Top
 				hand.position = Vector2(screen_size.x / 2, 100)
 				hand.rotation = deg_to_rad(180)
 			3: # Right
+				hand.rotation = deg_to_rad(270)
 				hand.position = Vector2(screen_size.x - 100, screen_size.y / 2)
-				hand.rotation = deg_to_rad(-90)
+				for card in hand._held_cards:
+					card.rotation_degrees -= 90
 				
 	# 4. Deal Initial Cards
 	deal_initial_cards()
@@ -79,6 +84,42 @@ func setup_game() -> void:
 	var initial_card = deck.get_top_cards(1)
 	if not initial_card.is_empty():
 		discard_pile.move_cards(initial_card)
+
+var selected_card_index = 0
+
+func _process(delta: float) -> void:
+	if hands_array.size() <= 1: return
+	
+	var hand_left = hands_array[1]
+	
+	# Hand Rotation (WASD)
+	if Input.is_physical_key_pressed(KEY_A):
+		hand_left.rotation_degrees -= 90 * delta
+		hand_left.update_card_ui()
+	if Input.is_physical_key_pressed(KEY_D):
+		hand_left.rotation_degrees += 90 * delta
+		hand_left.update_card_ui()
+		
+	# Card Selection (Up/Down)
+	if Input.is_action_just_pressed("ui_up"):
+		selected_card_index = min(selected_card_index + 1, hand_left.get_card_count() - 1)
+		print("Selected card index: ", selected_card_index)
+		
+	if Input.is_action_just_pressed("ui_down"):
+		selected_card_index = max(selected_card_index - 1, 0)
+		print("Selected card index: ", selected_card_index)
+		
+	# Rotate Selected Card (Left/Right)
+	if hand_left.get_card_count() > 0:
+		var cards = hand_left._held_cards
+		if Input.is_physical_key_pressed(KEY_LEFT):
+			for card in cards:
+				card.rotation_degrees -= 90 * delta	
+				print(card.rotation_degrees)
+		if Input.is_physical_key_pressed(KEY_RIGHT):
+			for card in cards:
+				card.rotation_degrees += 90 * delta	
+				print(card.rotation_degrees)
 
 func deal_initial_cards() -> void:
 	for i in range(num_cards_in_hand):

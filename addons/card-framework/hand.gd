@@ -112,19 +112,27 @@ func _update_target_positions() -> void:
 			hand_ratio = float(i) / float(_held_cards.size() - 1)
 		
 		# Calculate base horizontal position with even spacing
-		var target_pos = global_position
+		var local_pos = Vector2.ZERO
 		@warning_ignore("integer_division")
 		var card_spacing = max_hand_spread / (_held_cards.size() + 1)
-		target_pos.x += (i + 1) * card_spacing - max_hand_spread / 2.0
+		local_pos.x = (i + 1) * card_spacing - max_hand_spread / 2.0
 		
 		# Apply vertical curve displacement for fan shape
 		if hand_vertical_curve:
-			target_pos.y -= hand_vertical_curve.sample(hand_ratio)
+			local_pos.y -= hand_vertical_curve.sample(hand_ratio)
 		
 		# Apply rotation curve for realistic card fanning
 		var target_rotation = 0
 		if hand_rotation_curve:
 			target_rotation = deg_to_rad(hand_rotation_curve.sample(hand_ratio))
+			
+		# Transform to global position/rotation
+		# Layout follows hand rotation (rotate as a block)
+		var current_global_rotation = get_global_transform().get_rotation()
+		var target_pos = global_position + local_pos.rotated(current_global_rotation)
+		
+		# Counter-rotate cards so they keep "original" rotation (relative to screen, not hand)
+		target_rotation -= current_global_rotation
 		
 		# Calculate rotated card bounding box for drop zone partitioning
 		# This complex math determines the actual screen space occupied by each rotated card
