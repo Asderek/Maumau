@@ -9,6 +9,8 @@
 script = ExtResource("1_j8plu")
 num_players = 4
 hand_scene = ExtResource("2_xx6jl")
+base_offset_deck = Vector2(101, 0)
+base_offset_discard = Vector2(207, 0)
 
 [node name="CardManager" parent="." instance=ExtResource("3_m35op")]
 card_factory_scene = ExtResource("4_yvypw")

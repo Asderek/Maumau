@@ -251,3 +251,32 @@ func get_horizontal_layers() -> int:
 		else:
 			break
 	return current_index
+
+var highlight_node: Panel
+
+func set_highlight(active: bool) -> void:
+	if not highlight_node:
+		highlight_node = Panel.new()
+		highlight_node.editor_description = "DropZoneHighlight"
+		
+		var style = StyleBoxFlat.new()
+		style.draw_center = false
+		style.border_width_left = 4
+		style.border_width_top = 4
+		style.border_width_right = 4
+		style.border_width_bottom = 4
+		style.border_color = Color.GREEN
+		
+		highlight_node.add_theme_stylebox_override("panel", style)
+		highlight_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# Match sensor size and position
+		highlight_node.size = sensor.size
+		highlight_node.position = sensor.position
+		add_child(highlight_node)
+	
+	# Keep size in sync if it changes dynamically
+	if active:
+		highlight_node.size = sensor.size
+		highlight_node.position = sensor.position
+		
+	highlight_node.visible = active

@@ -382,3 +382,19 @@ func _remove_object(target: Node) -> void:
 	if parent != null:
 		parent.remove_child(target)
 	target.queue_free()
+
+
+func set_drop_highlight(active: bool) -> void:
+	if enable_drop_zone and drop_zone != null:
+		drop_zone.set_highlight(active)
+
+func can_accept_card(card: Card) -> bool:
+	if not enable_drop_zone or drop_zone == null:
+		return false
+	
+	# Check types
+	if not drop_zone.accept_types.has(CardManager.CARD_ACCEPT_TYPE):
+		return false
+		
+	# Check logic
+	return _card_can_be_added([card])

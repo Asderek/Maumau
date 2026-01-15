@@ -6,12 +6,6 @@
 layout_mode = 3
 anchors_preset = 0
 script = ExtResource("1_6ohl5")
-card_name = null
-card_size = null
-show_front = null
-moving_speed = null
-can_be_interacted_with = null
-hover_distance = null
 
 [node name="FrontFace" type="Control" parent="."]
 layout_mode = 1

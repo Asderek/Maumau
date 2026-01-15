@@ -258,3 +258,24 @@ func hold_card(card: Card) -> void:
 	if _held_cards.has(card):
 		drop_zone.set_vertical_partitions(vertical_partitions_from_inside)
 	super.hold_card(card)
+
+var is_active_hand: bool = false
+
+func set_highlight(active: bool) -> void:
+	is_active_hand = active
+	for card in _held_cards:
+		card.set_active_player_display(active)
+
+func update_card_ui() -> void:
+	super.update_card_ui()
+	# Ensure highlight persistence on potential reorders/adds
+	for card in _held_cards:
+		card.set_active_player_display(is_active_hand)
+
+## Override to ensure highlight is cleared when card leaves the hand
+func remove_card(card: Card) -> bool:
+	# Clear any highlights when leaving the hand
+	card.set_active_player_display(false)
+	# Also clear helper display just in case
+	card.set_helper_display(false) 
+	return super.remove_card(card)

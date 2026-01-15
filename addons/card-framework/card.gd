@@ -43,6 +43,13 @@ static var holding_card_count: int = 0
 			front_face_texture.visible = false
 			back_face_texture.visible = true
 
+@export_group("Highlight Styles")
+@export var active_player_color: Color = Color.KHAKI
+@export var active_player_width: int = 6
+@export var helper_display_color: Color = Color.GREEN
+@export var helper_display_invalid_color: Color = Color.RED
+@export var helper_display_width: int = 6
+
 
 # Card data and container reference
 var card_info: Dictionary
@@ -93,6 +100,8 @@ func _enter_state(state: DraggableState, from_state: DraggableState) -> void:
 			holding_card_count += 1
 			if card_container:
 				card_container.hold_card(self)
+				if card_container.card_manager:
+					card_container.card_manager.on_card_drag_started(self)
 
 # Override state exit to add card-specific logic
 func _exit_state(state: DraggableState) -> void:
@@ -101,6 +110,8 @@ func _exit_state(state: DraggableState) -> void:
 			hovering_card_count -= 1
 		DraggableState.HOLDING:
 			holding_card_count -= 1
+			if card_container and card_container.card_manager:
+				card_container.card_manager.on_card_drag_ended(self)
 	
 	super._exit_state(state)
 
@@ -130,6 +141,82 @@ func _handle_mouse_pressed() -> void:
 
 ## Handles mouse release events and releases held cards.
 func _handle_mouse_released() -> void:
+
 	super._handle_mouse_released()
 	if card_container:
 		card_container.release_holding_cards()
+
+
+var active_highlight_node: Panel
+var helper_highlight_node: Panel
+
+## Controls whether the card shows the Active Player highlight.
+var _is_active_player_display: bool = false
+var is_active_player_display: bool:
+	get: return _is_active_player_display
+	set(value):
+		set_active_player_display(value)
+
+## Controls whether the card shows the Helper highlight (Drop Target).
+var _is_helper_display: bool = false
+var is_helper_display: bool:
+	get: return _is_helper_display
+	set(value):
+		set_helper_display(value)
+
+## Shows or hides the Active Player highlight (Turn indicator).
+func set_active_player_display(active: bool) -> void:
+	if active == _is_active_player_display and active_highlight_node and active_highlight_node.visible == active:
+		return
+		
+	if not active_highlight_node:
+		active_highlight_node = _create_highlight_panel("ActivePlayerHighlight", active_player_color, active_player_width)
+		add_child(active_highlight_node)
+	
+	active_highlight_node.visible = active
+	_is_active_player_display = active
+
+## Shows or hides the Helper highlight (Drag target indicator).
+func set_helper_display(active: bool, is_valid: bool = true) -> void:
+	if active == _is_helper_display and helper_highlight_node and helper_highlight_node.visible == active:
+		# Check if validity changed while still active
+		var target_color = helper_display_color if is_valid else helper_display_invalid_color
+		var style = helper_highlight_node.get_theme_stylebox("panel") as StyleBoxFlat
+		if style and style.border_color != target_color:
+			style.border_color = target_color
+		return
+
+	if not helper_highlight_node:
+		helper_highlight_node = _create_highlight_panel("HelperHighlight", helper_display_color, helper_display_width)
+		add_child(helper_highlight_node)
+		
+	# Update color based on validity
+	var style = helper_highlight_node.get_theme_stylebox("panel") as StyleBoxFlat
+	if style:
+		style.border_color = helper_display_color if is_valid else helper_display_invalid_color
+		
+	helper_highlight_node.visible = active
+	_is_helper_display = active
+
+## Helper to create highlight panels
+func _create_highlight_panel(p_name: String, p_color: Color, p_width: int) -> Panel:
+	var node = Panel.new()
+	node.editor_description = p_name
+	
+	var style = StyleBoxFlat.new()
+	style.draw_center = false
+	style.border_width_left = p_width
+	style.border_width_top = p_width
+	style.border_width_right = p_width
+	style.border_width_bottom = p_width
+	style.border_color = p_color
+	
+	node.add_theme_stylebox_override("panel", style)
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	node.size = card_size
+	return node
+
+## Deprecated: Compatibility Alias for show_highlight
+## Redirects to set_active_player_display (assuming old logic meant turn highlight)
+func show_highlight(active: bool) -> void:
+	set_active_player_display(active)

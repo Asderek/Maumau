@@ -44,6 +44,7 @@ const CARD_ACCEPT_TYPE = "card"
 var card_factory: CardFactory
 var card_container_dict: Dictionary = {}
 var history: Array[HistoryElement] = []
+var current_dragged_cards: Array[Card] = []
 
 
 func _init() -> void:
@@ -166,3 +167,21 @@ func _pre_process_exported_variables() -> bool:
 	add_child(factory_instance)
 	card_factory = factory_instance
 	return true
+
+
+func on_card_drag_started(card: Card) -> void:
+	if not current_dragged_cards.has(card):
+		current_dragged_cards.append(card)
+		
+	for container in card_container_dict.values():
+		# Optional: Don't highlight the source container to avoid clutter?
+		# Or maybe we want to reorder. Let's keep it simple for now.
+		if container.can_accept_card(card):
+			container.set_drop_highlight(true)
+
+func on_card_drag_ended(card: Card) -> void:
+	if current_dragged_cards.has(card):
+		current_dragged_cards.erase(card)
+		
+	for container in card_container_dict.values():
+		container.set_drop_highlight(false)

@@ -20,12 +20,14 @@
 ## Usage:
 ## [codeblock]
 ## @onready var deck = $Deck
-## deck.layout = Pile.PileDirection.DOWN
+## deck.stack_direction = Pile.PileDirection.DOWN
 ## deck.card_face_up = false
 ## deck.restrict_to_top_card = true
 ## [/codeblock]
 class_name Pile
 extends CardContainer
+
+signal card_pressed(card: Card)
 
 # Enums
 ## Defines the stacking direction for cards in the pile.
@@ -33,7 +35,8 @@ enum PileDirection {
 	UP,    ## Cards stack upward (negative Y direction)
 	DOWN,  ## Cards stack downward (positive Y direction) 
 	LEFT,  ## Cards stack leftward (negative X direction)
-	RIGHT  ## Cards stack rightward (positive X direction)
+	RIGHT,  ## Cards stack rightward (positive X direction)
+	CENTER ## Cards stack on top of each other (no offset)
 }
 
 @export_group("pile_layout")
@@ -43,9 +46,13 @@ enum PileDirection {
 ## Cards beyond this limit will be hidden under the visible stack
 @export var max_stack_display := CardFrameworkSettings.LAYOUT_MAX_STACK_DISPLAY
 ## Whether cards in the pile show their front face (true) or back face (false)
+## Whether cards in the pile show their front face (true) or back face (false)
 @export var card_face_up := true
 ## Direction in which cards are stacked from the pile's base position
-@export var layout := PileDirection.UP
+@export var stack_direction := PileDirection.UP
+## Ratio of the card size that will be overlapped by the next card (0.0 to 1.0)
+@export var card_overlap_ratio: float = 0.8
+
 
 @export_group("pile_interaction")
 ## Whether any card in the pile can be moved via drag-and-drop
@@ -95,39 +102,88 @@ func _update_target_positions() -> void:
 	if enable_drop_zone and align_drop_zone_with_top_card:
 		drop_zone.change_sensor_position_with_offset(last_offset)
 
+	# Calculate visible range (Last N Cards)
+	var total_cards = _held_cards.size()
+	var start_index = 0
+	if total_cards > max_stack_display:
+		start_index = total_cards - max_stack_display
+
 	# Position each card and set interaction state
-	for i in range(_held_cards.size()):
+	for i in range(total_cards):
 		var card = _held_cards[i]
-		var offset = _calculate_offset(i)
+		
+		# Set card visibility based on range
+		if i < start_index:
+			card.visible = false
+			# Position hidden cards at base or off-screen if needed, 
+			# but hiding them usually sufficient. Let's keep them at base.
+			card.move(position, 0)
+			card.can_be_interacted_with = false
+			continue # Skip further processing for hidden cards
+		
+		card.visible = true
+		
+		# Calculate offset relative to the start of the visible stack
+		# Current visible index (0 to max_stack_display-1)
+		var visible_index = i - start_index
+		var offset = _calculate_offset_for_visible(visible_index)
 		var target_pos = position + offset
 		
 		# Set card appearance and position
 		card.show_front = card_face_up
+		card.scale = Vector2.ONE # Ensure scale is reset from any hover effects
 		card.move(target_pos, 0)
 		
 		# Apply interaction restrictions
 		if not allow_card_movement: 
 			card.can_be_interacted_with = false
 		elif restrict_to_top_card:
-			if i == _held_cards.size() - 1:
+			if i == total_cards - 1:
 				card.can_be_interacted_with = true
 			else:
 				card.can_be_interacted_with = false
 		else:
 			card.can_be_interacted_with = true
 
-## Calculates the visual offset for a card at the given index in the stack.
-## Respects max_stack_display limit to prevent excessive visual spreading.
-## @param index: Position of the card in the stack (0 = bottom, higher = top)
-## @returns: Vector2 offset from the pile's base position
+## Calculates the visual offset for a visible card based on overlap ratio.
+func _calculate_offset_for_visible(visible_index: int) -> Vector2:
+	var card_size = Vector2(100, 140) # Default fallback
+	if _held_cards.size() > 0:
+		card_size = _held_cards[0].card_size
+		
+	var offset_value = visible_index * (card_size.y * (1.0 - card_overlap_ratio))
+	# Adjust for horizontal stacks if needed
+	var offset_value_x = visible_index * (card_size.x * (1.0 - card_overlap_ratio))
+	
+	var offset = Vector2()
+
+	# Apply directional offset
+	match stack_direction:
+		PileDirection.UP:
+			offset.y -= offset_value  # Stack upward (negative Y)
+		PileDirection.DOWN:
+			offset.y += offset_value  # Stack downward (positive Y)
+		PileDirection.RIGHT:
+			offset.x += offset_value_x  # Stack rightward (positive X)
+		PileDirection.LEFT:
+			offset.x -= offset_value_x  # Stack leftward (negative X)
+		PileDirection.CENTER:
+			pass # No offset (single stack)
+
+	return offset
+
+
+## Legacy internal method - kept for potential compatibility or other internal uses,
+## but _calculate_offset_for_visible is preferred for the new stack logic.
 func _calculate_offset(index: int) -> Vector2:
+	return _calculate_offset_for_visible(min(index, max_stack_display))
 	# Clamp to maximum display limit to prevent visual overflow
 	var actual_index = min(index, max_stack_display - 1)
 	var offset_value = actual_index * (stack_display_gap)
 	var offset = Vector2()
 
 	# Apply directional offset based on pile layout
-	match layout:
+	match stack_direction:
 		PileDirection.UP:
 			offset.y -= offset_value  # Stack upward (negative Y)
 		PileDirection.DOWN:
@@ -138,3 +194,7 @@ func _calculate_offset(index: int) -> Vector2:
 			offset.x -= offset_value  # Stack leftward (negative X)
 
 	return offset
+
+
+func on_card_pressed(card: Card) -> void:
+	card_pressed.emit(card)

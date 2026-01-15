@@ -48,9 +48,10 @@ enum DraggableState {
 @export var hover_scale: float = CardFrameworkSettings.ANIMATION_HOVER_SCALE
 ## The rotation in degrees when hovering.
 @export var hover_rotation: float = CardFrameworkSettings.ANIMATION_HOVER_ROTATION
+## Whether the object rotates when hovering.
+@export var rotate_on_hover: bool = false
 ## The duration for hover animations.
 @export var hover_duration: float = CardFrameworkSettings.ANIMATION_HOVER_DURATION
-
 
 # Legacy variables - kept for compatibility but no longer used in state machine
 var is_pressed: bool = false
@@ -242,8 +243,10 @@ func _start_hover_animation() -> void:
 	# Animate scale
 	hover_tween.tween_property(self, "scale", original_scale * hover_scale, hover_duration)
 	
-	# Animate rotation
-	hover_tween.tween_property(self, "rotation", deg_to_rad(hover_rotation), hover_duration)
+	# Animate rotation if enabled
+	if rotate_on_hover:
+		hover_tween.tween_property(self, "rotation", deg_to_rad(hover_rotation), hover_duration)
+
 	
 	# Update current hover position tracking
 	hover_tween.tween_method(_update_hover_position, position, target_position, hover_duration)
