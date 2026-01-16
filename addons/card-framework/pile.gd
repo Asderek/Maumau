@@ -136,14 +136,18 @@ func _update_target_positions() -> void:
 		
 		# Apply interaction restrictions
 		if not allow_card_movement: 
-			card.can_be_interacted_with = false
+			card.can_be_interacted_with = true
+			card.can_be_dragged = false
 		elif restrict_to_top_card:
 			if i == total_cards - 1:
 				card.can_be_interacted_with = true
+				card.can_be_dragged = true
 			else:
 				card.can_be_interacted_with = false
+				card.can_be_dragged = false
 		else:
 			card.can_be_interacted_with = true
+			card.can_be_dragged = true
 
 ## Calculates the visual offset for a visible card based on overlap ratio.
 func _calculate_offset_for_visible(visible_index: int) -> Vector2:

@@ -36,6 +36,10 @@ func _ready() -> void:
 var top_bar_height: float = 0.0
 
 func setup_game() -> void:
+	# Initialize player count from Globals
+	num_players = GameGlobals.num_players
+	print("Starting game with ", num_players, " players.")
+	
 	var screen_size = get_viewport().get_visible_rect().size
 	
 	# Calculate Top Bar Height (5% of screen)
@@ -45,12 +49,24 @@ func setup_game() -> void:
 	var available_rect = Rect2(0, top_bar_height, screen_size.x, screen_size.y - top_bar_height)
 	var center_point = available_rect.get_center()
 
+	# --- Dynamic Scaling for Crowded Tables ---
+	var global_scale_factor = Vector2.ONE
+	if num_players >= 8:
+		# User requested scaling for 8+ players to avoid crowding
+		# "Move Camera Back" effect = Scale Down Everything
+		global_scale_factor = Vector2(0.75, 0.75)
+		print("Large table detected (" + str(num_players) + " players). Scaling elements by 0.75x")
+
 	# 1. Instantiate and Shuffle Deck
 	deck = deck_scene.instantiate()
 	deck.name = "Deck"
-	deck.stack_direction = Pile.PileDirection.CENTER
-	deck.card_face_up = false
 	card_manager.add_child(deck)
+	
+	# Configure Deck
+	deck.stack_direction = Pile.PileDirection.CENTER 
+	deck.card_face_up = false
+	deck.allow_card_movement = false 
+	deck.scale = global_scale_factor # Apply Scaler.add_child(deck)
 	
 	# Position Deck (Center Left of available area)
 	deck.position = center_point - (base_offset_deck * layout_scale)
@@ -67,16 +83,13 @@ func setup_game() -> void:
 	discard_pile = discard_pile_scene.instantiate()
 	discard_pile.name = "DiscardPile"
 	discard_pile.stack_direction = Pile.PileDirection.RIGHT
+	discard_pile.scale = global_scale_factor # Apply Scale
 	card_manager.add_child(discard_pile)
 	
 	# Position Discard Pile (Center Right of available area)
 	discard_pile.position = center_point + (base_offset_discard * layout_scale)
 	
-	if not discard_pile.card_played.is_connected(_on_card_played):
-		discard_pile.card_played.connect(_on_card_played)
-		print("DEBUG: Manager connected to DiscardPile signal.")
-	else:
-		print("DEBUG: Manager ALREADY connected to DiscardPile signal. Skipping.")
+	# Note: Signal connection moved to AFTER initial deal to prevent first card from triggering turns/effects
 	
 	
 	
@@ -84,6 +97,10 @@ func setup_game() -> void:
 	for player in range(num_players):
 		var hand = hand_scene.instantiate()
 		hands_array.append(hand)
+		
+		# Apply Scale
+		hand.scale = global_scale_factor
+		
 		card_manager.add_child(hand)
 		
 		# Configure Hand
@@ -94,35 +111,33 @@ func setup_game() -> void:
 		#else:
 		#	hand.card_face_up = false # Opponent cards face down
 			
-		# Position Hands (Simple Cross Layout)
-		# Reverting to manual Vector2 positioning for stability
-		var scaled_padding = base_padding_hand * layout_scale
-		match player:
-			0: # Bottom (Player)
-				# Reset anchors to default to avoid conflict
-				hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-				hand.position = Vector2(center_point.x, screen_size.y - scaled_padding)
-				hand.rotation = 0
-			1: # Left
-				hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-				hand.position = Vector2(scaled_padding, center_point.y)
-				hand.rotation = deg_to_rad(90)
-				for card in hand._held_cards:
-					card.rotation_degrees = 0
-				
-			2: # Top
-				hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-				# Position at exact horizontal center + offset
-				# Push down by top_bar_height + padding + extra margin (50)
-				# Move right by 40px to fix visual center
-				hand.position = Vector2(center_point.x + 40, top_bar_height + scaled_padding + 50)
-				hand.rotation = deg_to_rad(180)
-			3: # Right
-				hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-				hand.position = Vector2(screen_size.x - scaled_padding, center_point.y)
-				hand.rotation = deg_to_rad(270)
-				for card in hand._held_cards:
-					card.rotation_degrees -= 90
+		# Position Hands (Dynamic Layout)
+		var transform_data = _get_hand_transform(player, num_players, center_point, screen_size)
+		
+		hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		hand.position = transform_data["position"]
+		hand.rotation = transform_data["rotation"]
+		
+		# Adjust card rotations for side players if needed (cleanup previous)
+		for card in hand._held_cards:
+			card.rotation_degrees = 0
+			# If hand is rotated 90 or 270 (Left/Right), we might typically rotate cards?
+			# But if the entire Hand node is rotated, the cards rotate with it.
+			# Previous logic had "card.rotation_degrees -= 90".
+			# Let's rely on Node rotation first. If visuals are odd, we can revisit.
+			pass
+			
+		# Correction for visual "facing":
+		# The Hand script arranges cards along X axis.
+		# If Hand is rotated, X axis rotates.
+		# So cards should align naturally along the table edge.
+		# However, for Left/Right players, the cards might look "sideways" if we don't counter-rotate?
+		# Let's stick to Node rotation: It represents the player's perspective.
+		
+		# Fix for Right Player (Index 3 in 4-player):
+		# Previous logic: rotation 270. card rotation -90.
+		# If we just rotate Hand 270, cards are sideways pointing IN.
+		# That seems correct for a "sitting at table" view.
 				
 	# 4. Deal Initial Cards
 	deal_initial_cards()
@@ -131,6 +146,11 @@ func setup_game() -> void:
 	var initial_card = deck.get_top_cards(1)
 	if not initial_card.is_empty():
 		discard_pile.move_cards(initial_card)
+
+	# Connect Signal NOW, after initial card is placed
+	if not discard_pile.card_played.is_connected(_on_card_played):
+		discard_pile.card_played.connect(_on_card_played)
+		print("DEBUG: Manager connected to DiscardPile signal (Post-Setup).")
 
 	# Randomize first player
 	current_player = (randi() % num_players) + 1
@@ -144,6 +164,9 @@ func setup_game() -> void:
 	player_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	update_turn_ui()
 	update_player_stats()
+
+	# --- Run Debug Scenarios (Overrides) ---
+	_run_debug_scenarios()
 
 var play_direction: int = 1 # 1 for clockwise, -1 for counter-clockwise
 var last_player_who_played: int = -1
@@ -221,14 +244,65 @@ func _on_deck_card_pressed(_card: Card) -> void:
 			hands_array[current_player - 1].move_cards(card_array)
 			update_player_stats()
 
+# Modified to fill hands up to the limit, allowing for pre-seeded debug cards
 func deal_initial_cards() -> void:
-	for i in range(num_cards_in_hand):
+	# Run debug setup first (if any)
+	_run_debug_scenarios()
+	
+	# Round-robin deal until everyone has 'num_cards_in_hand'
+	var cards_needed = true
+	while cards_needed:
+		cards_needed = false
 		for player_hand in hands_array:
-			var card_array = deck.get_top_cards(1)
-			if card_array.is_empty():
-				push_warning("Deck empty during initial deal!")
-				break
-			player_hand.move_cards(card_array)
+			if player_hand._held_cards.size() < num_cards_in_hand:
+				cards_needed = true
+				var card_array = deck.get_top_cards(1)
+				if card_array.is_empty():
+					push_warning("Deck empty during initial deal!")
+					return
+				player_hand.move_cards(card_array)
+
+# --- Debug Helpers ---
+
+func _run_debug_scenarios() -> void:
+	# pass
+	# Example: Give Player 1 (Index 0) a Heart 9
+	# debug_move_card_to_hand(0, "heart_9")
+	# debug_move_card_to_hand(1, "club_A")
+	debug_move_card_to_hand(0,"heart_9")
+	debug_move_card_to_hand(0,"club_9")
+	debug_move_card_to_hand(0,"spade_9")
+	debug_move_card_to_hand(0,"diamond_9")
+	
+	debug_set_starting_player(0)
+
+func debug_set_starting_player(player_idx: int) -> void:
+	if player_idx < 0 or player_idx >= num_players:
+		printerr("Debug Error: Invalid starting player index ", player_idx)
+		return
+	
+	# Convert 0-based index to 1-based logic used by game
+	current_player = player_idx + 1
+	print("DEBUG: Force starting player to: ", current_player)
+	update_turn_ui()
+
+func debug_move_card_to_hand(player_idx: int, card_name: String) -> void:
+	if player_idx < 0 or player_idx >= hands_array.size():
+		printerr("Debug Error: Invalid player index ", player_idx)
+		return
+		
+	# Find card in deck
+	var target_card: Card = null
+	for card in deck._held_cards:
+		if card.card_name == card_name:
+			target_card = card
+			break
+			
+	if target_card:
+		print("DEBUG: Moving ", card_name, " to Player ", (player_idx + 1))
+		hands_array[player_idx].move_cards([target_card])
+	else:
+		printerr("Debug Error: Card not found in deck: ", card_name)
 			# Add a small delay/tween here if we wanted visuals, but logic is instant for now
 		
 func populate_deck() -> void:
@@ -493,6 +567,11 @@ func setup_ui() -> void:
 	hbox.add_theme_constant_override("separation", 20)
 	top_bar.add_child(hbox)
 	
+	# Spacer Left (to balance Right spacer and center content)
+	var spacer_left = Control.new()
+	spacer_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer_left)
+	
 	# Add Player Names
 	player_labels.clear()
 	for i in range(1, num_players + 1):
@@ -514,6 +593,22 @@ func setup_ui() -> void:
 	pass_btn.text = "Pass Turn"
 	pass_btn.pressed.connect(_on_pass_turn_pressed)
 	hbox.add_child(pass_btn)
+	
+	# Spacer Right
+	var spacer_right = Control.new()
+	spacer_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer_right)
+	
+	# Settings/Gear Button
+	var settings_btn = Button.new()
+	settings_btn.text = "⚙" # Gear emoji as icon for now
+	settings_btn.pressed.connect(_on_settings_pressed)
+	hbox.add_child(settings_btn)
+	
+	# Spacer End
+	var spacer_end = Control.new()
+	spacer_end.custom_minimum_size = Vector2(20, 0)
+	hbox.add_child(spacer_end)
 	
 	# --- Game Log UI ---
 	var log_panel = PanelContainer.new()
@@ -538,9 +633,63 @@ func setup_ui() -> void:
 	game_log_label.text = "[b]Game Log Started[/b]"
 	log_panel.add_child(game_log_label)
 	
+	# --- Options Menu UI ---
+	_setup_options_menu()
+	
 	update_player_stats()
 
 var game_log_label: RichTextLabel
+var options_menu: PanelContainer
+
+func _setup_options_menu() -> void:
+	options_menu = PanelContainer.new()
+	options_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	options_menu.visible = false # Hidden default
+	
+	# Style
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.95)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color.WHITE
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_right = 10
+	style.corner_radius_bottom_left = 10
+	style.content_margin_left = 20
+	style.content_margin_top = 20
+	style.content_margin_right = 20
+	style.content_margin_bottom = 20
+	options_menu.add_theme_stylebox_override("panel", style)
+	
+	hud_layer.add_child(options_menu)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 15)
+	options_menu.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "OPTIONS"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(title)
+	
+	var btn_quit = Button.new()
+	btn_quit.text = "Quit Game"
+	btn_quit.pressed.connect(_on_quit_game_pressed)
+	vbox.add_child(btn_quit)
+	
+	var btn_ops = Button.new()
+	btn_ops.text = "Options"
+	btn_ops.pressed.connect(_on_options_pressed)
+	vbox.add_child(btn_ops)
+	
+	var btn_close = Button.new()
+	btn_close.text = "Close Window"
+	btn_close.pressed.connect(_on_close_menu_pressed)
+	vbox.add_child(btn_close)
 
 func log_message(text: String) -> void:
 	if game_log_label:
@@ -559,3 +708,111 @@ func update_player_stats() -> void:
 func _on_pass_turn_pressed() -> void:
 	print("Pass Turn Pressed")
 	cycle_turn()
+
+# --- Options Menu Callbacks ---
+func _on_settings_pressed() -> void:
+	if options_menu:
+		options_menu.visible = !options_menu.visible
+		# Optional: Pause game? 
+		# get_tree().paused = options_menu.visible
+
+func _on_quit_game_pressed() -> void:
+	print("Quit Game Pressed")
+	# Switch to Main Menu
+	get_tree().change_scene_to_file("res://Maumau/MainMenu.tscn")
+
+func _on_options_pressed() -> void:
+	print("Options Pressed placeholder")
+
+func _on_close_menu_pressed() -> void:
+	if options_menu:
+		options_menu.visible = false
+
+# --- Dynamic Layout Helper ---
+func _get_hand_transform(player_idx: int, total_players: int, center: Vector2, screen_size: Vector2) -> Dictionary:
+	var result = {"position": Vector2.ZERO, "rotation": 0.0, "face_up": false}
+	var scaled_padding = base_padding_hand * layout_scale
+	
+	# Default: Face center(ish) but we handle specifics per case
+	
+	if total_players <= 4:
+		# Specific Fixed Layouts
+		match total_players:
+			1: # Just Bottom
+				result.position = Vector2(center.x, screen_size.y - scaled_padding)
+				result.rotation = 0
+				result.face_up = true
+			2: # Bottom, Top
+				if player_idx == 0: # Bottom
+					result.position = Vector2(center.x, screen_size.y - scaled_padding)
+					result.rotation = 0
+					result.face_up = true
+				else: # Top
+					result.position = Vector2(center.x, top_bar_height + scaled_padding + 50) 
+					result.rotation = deg_to_rad(180)
+			3: # Bottom, Left, Top
+				match player_idx:
+					0: # Bottom
+						result.position = Vector2(center.x, screen_size.y - scaled_padding)
+						result.rotation = 0
+						result.face_up = true
+					1: # Left
+						result.position = Vector2(scaled_padding, center.y)
+						result.rotation = deg_to_rad(90)
+					2: # Top
+						result.position = Vector2(center.x, top_bar_height + scaled_padding + 50)
+						result.rotation = deg_to_rad(180)
+			4: # Bottom, Left, Top, Right
+				match player_idx:
+					0: # Bottom
+						result.position = Vector2(center.x, screen_size.y - scaled_padding)
+						result.rotation = 0
+						result.face_up = true
+					1: # Left
+						result.position = Vector2(scaled_padding, center.y)
+						result.rotation = deg_to_rad(90)
+					2: # Top
+						result.position = Vector2(center.x, top_bar_height + scaled_padding + 50)
+						result.rotation = deg_to_rad(180)
+					3: # Right
+						result.position = Vector2(screen_size.x - scaled_padding, center.y)
+						result.rotation = deg_to_rad(270)
+	else:
+		# 5+ Players: Ellipse Distribution
+		# P0 is always bottom (90 degrees in math terms if 0 is right? No, Godot 0 degrees is Right, 90 is Down)
+		# Let's map indexes to angles.
+		# We want P0 at 90 deg (Bottom).
+		# We want P1, P2... distributed clockwise? Or Counter-Clockwise?
+		# Standard table dealing is usually clockwise (Left player is next).
+		
+		var rx = (screen_size.x / 2.0) - scaled_padding
+		var ry = (screen_size.y / 2.0) - scaled_padding - (top_bar_height/2)
+		
+		# Angle step
+		var angle_step = (PI * 2) / total_players
+		
+		# Start angle: P0 at Bottom (PI/2 or 90 deg)
+		var current_angle = PI / 2.0 + (player_idx * angle_step)
+		
+		# Calculate Position on Ellipse
+		# x = center.x + rx * cos(angle)
+		# y = center.y + ry * sin(angle)
+		result.position = Vector2(
+			center.x + rx * cos(current_angle),
+			center.y + ry * sin(current_angle)
+		)
+		
+		# Rotation: Card "bottom" should face OUTWARDS or INWARDS?
+		# Usually Hand connects to screen edge. 
+		# Rotation = Angle - 90 deg (PI/2) seems standard so "Up" vector points to center?
+		# Let's try: Look at center.
+		# Godot Sprite: Right is 0. Down is 90.
+		# If at Bottom (90deg), valid rotation is 0. (90 - 90 = 0).
+		# If at Top (270deg), valid rotation is 180. (270 - 90 = 180).
+		# So: rotation = angle - PI/2
+		result.rotation = current_angle - (PI / 2.0)
+		
+		# Logic for face up: Only local player?
+		result.face_up = (player_idx == 0)
+
+	return result

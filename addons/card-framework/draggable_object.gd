@@ -42,6 +42,8 @@ enum DraggableState {
 @export var moving_speed: int = CardFrameworkSettings.ANIMATION_MOVE_SPEED
 ## Whether the object can be interacted with.
 @export var can_be_interacted_with: bool = true
+## Whether the object can be dragged (if false, clicks still work).
+@export var can_be_dragged: bool = true
 ## The distance the object hovers when interacted with.
 @export var hover_distance: int = CardFrameworkSettings.PHYSICS_HOVER_DISTANCE
 ## The scale multiplier when hovering.
@@ -152,8 +154,22 @@ func _enter_state(state: DraggableState, from_state: DraggableState) -> void:
 				_preserve_hover_position()
 			# For IDLE → HOLDING transitions, current position is maintained
 			
-			current_holding_mouse_position = get_local_mouse_position()
+			# FIX: Calculate mouse offset relative to local un-rotated space
+			# This ensures that when we snap rotation to 0, we pivot around the MOUSE position, not the origin.
+			var global_rot = get_global_transform().get_rotation()
+			var mouse_global = get_global_mouse_position()
+			var origin_global = global_position
+			
+			# Vector from Origin to Mouse
+			var diff = mouse_global - origin_global
+			# Validate rotation to avoid math errors (though vector rotation is safe)
+			# Store the "Local" vector (as if unrotated)
+			current_holding_mouse_position = diff.rotated(-global_rot)
+			
 			z_index = stored_z_index + CardFrameworkSettings.VISUAL_DRAG_Z_OFFSET
+			
+			# Detach from parent transform to avoid scaling/rotation issues from Hand
+			top_level = true
 			rotation = 0
 			
 		DraggableState.MOVING:
@@ -178,6 +194,23 @@ func _exit_state(state: DraggableState) -> void:
 			scale = original_scale
 			rotation = original_hover_rotation
 			
+			# FIX for "Flying from Space":
+			# Before disabling top_level, we must convert the current GLOBAL position
+			# into the PARENT's LOCAL space. Otherwise, the current global coordinates
+			# are interpreted as local coordinates, which are huge.
+			var current_global_pos = global_position
+			var parent = get_parent()
+			if parent:
+				# Convert global pos to local pos relative to parent
+				# use affine_inverse to account for parent's rotation/scale
+				var local_pos = parent.get_global_transform().affine_inverse() * current_global_pos
+				top_level = false
+				position = local_pos
+			else:
+				top_level = false
+			
+			# Resume normal behavior
+			
 		DraggableState.MOVING:
 			mouse_filter = Control.MOUSE_FILTER_STOP
 
@@ -185,7 +218,9 @@ func _exit_state(state: DraggableState) -> void:
 func _process(delta: float) -> void:
 	match current_state:
 		DraggableState.HOLDING:
-			global_position = get_global_mouse_position() - current_holding_mouse_position
+			# FIX: Apply offset with current rotation (which is 0)
+			# global_pos = mouse - local_offset.rotated(current_rot)
+			global_position = get_global_mouse_position() - current_holding_mouse_position.rotated(rotation)
 
 
 func _finish_move() -> void:
@@ -381,10 +416,12 @@ func _handle_mouse_pressed() -> void:
 	is_pressed = true
 	match current_state:
 		DraggableState.HOVERING:
-			change_state(DraggableState.HOLDING)
+			if can_be_dragged:
+				change_state(DraggableState.HOLDING)
 		DraggableState.IDLE:
 			if is_mouse_inside and can_be_interacted_with and _can_start_hovering():
-				change_state(DraggableState.HOLDING)
+				if can_be_dragged:
+					change_state(DraggableState.HOLDING)
 
 
 func _handle_mouse_released() -> void:

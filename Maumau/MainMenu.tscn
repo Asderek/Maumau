@@ -1,0 +1,93 @@
+[gd_scene load_steps=3 format=3 uid="uid://vyscnfrgtv7h"]
+
+[ext_resource type="Script" uid="uid://cdu8mvdm4en4w" path="res://Maumau/MainMenu.gd" id="1_script"]
+[ext_resource type="StyleBox" path="res://Maumau/panel_bg.tres" id="2_bg"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Panel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = ExtResource("2_bg")
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = "MAUMAU"
+horizontal_alignment = 1
+
+[node name="StartButton" type="Button" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+text = "Open Table"
+
+[node name="OptionsButton" type="Button" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+text = "Options"
+
+[node name="QuitButton" type="Button" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+text = "Quit to Desktop"
+
+[node name="PlayerCountPopup" type="PopupPanel" parent="."]
+title = "Setup Table"
+initial_position = 2
+size = Vector2i(300, 150)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PlayerCountPopup"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 296.0
+offset_bottom = 146.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="Label" type="Label" parent="PlayerCountPopup/VBoxContainer"]
+layout_mode = 2
+text = "Number of Players:"
+horizontal_alignment = 1
+
+[node name="SpinBox" type="SpinBox" parent="PlayerCountPopup/VBoxContainer"]
+layout_mode = 2
+min_value = 2.0
+max_value = 10.0
+value = 4.0
+alignment = 1
+
+[node name="ConfirmButton" type="Button" parent="PlayerCountPopup/VBoxContainer"]
+layout_mode = 2
+text = "Confirm"
+
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartButton" to="." method="_on_open_table_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/OptionsButton" to="." method="_on_options_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/QuitButton" to="." method="_on_quit_desktop_pressed"]
+[connection signal="pressed" from="PlayerCountPopup/VBoxContainer/ConfirmButton" to="." method="_on_confirm_players_pressed"]

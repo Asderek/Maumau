@@ -48,6 +48,8 @@ extends CardContainer
 @export var align_drop_zone_size_with_current_hand_size := true
 ## If true, only swap the positions of two cards when reordering (a <-> b), otherwise shift the range (default behavior).
 @export var swap_only_on_reorder := false
+## If true, allows interaction even if is_active_hand is false (e.g. for stealing cards).
+@export var allow_remote_interaction := false
 
 
 var vertical_partitions_from_outside = []
@@ -131,6 +133,11 @@ func _update_target_positions() -> void:
 		var current_global_rotation = get_global_transform().get_rotation()
 		var target_pos = global_position + local_pos.rotated(current_global_rotation)
 		
+		# Ensure card is visible (fix for cards coming from hidden stockpile)
+		card.visible = true
+		# Reset z-index to avoid "under the table" issues
+		card.z_index = 0 
+		
 		# Counter-rotate cards so they keep "original" rotation (relative to screen, not hand)
 		target_rotation -= current_global_rotation
 		
@@ -176,7 +183,11 @@ func _update_target_positions() -> void:
 
 		card.move(target_pos, target_rotation)
 		card.show_front = card_face_up
-		card.can_be_interacted_with = true
+		# Only allow interaction if this is the active hand OR remote interaction is allowed
+		var interactable = is_active_hand or allow_remote_interaction
+		card.can_be_interacted_with = interactable
+		# Ensure drag is allowed (if interaction is allowed) - fixes persistence from Deck where drag is false
+		card.can_be_dragged = true
 
 	# Calculate midpoints between consecutive values in vertical_partitions_from_outside
 	vertical_partitions_from_inside.clear()
@@ -265,6 +276,8 @@ func set_highlight(active: bool) -> void:
 	is_active_hand = active
 	for card in _held_cards:
 		card.set_active_player_display(active)
+		# Update interaction status immediately when turn changes
+		card.can_be_interacted_with = is_active_hand or allow_remote_interaction
 
 func update_card_ui() -> void:
 	super.update_card_ui()

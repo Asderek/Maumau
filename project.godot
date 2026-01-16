@@ -11,8 +11,12 @@ config_version=5
 [application]
 
 config/name="CardFramework"
-run/main_scene="uid://dvw0upwegu623"
+run/main_scene="res://Maumau/MainMenu.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
+
+[autoload]
+
+GameGlobals="*res://Maumau/game_globals.gd"
 
 [display]
 
