@@ -26,6 +26,7 @@ var player_labels: Array[Label] = []
 var deck: Pile
 var discard_pile: MauMauPile
 var player_label: Label
+var effect_status_bar: EffectStatusBar
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -139,10 +140,17 @@ func setup_game() -> void:
 		# If we just rotate Hand 270, cards are sideways pointing IN.
 		# That seems correct for a "sitting at table" view.
 				
-	# 4. Deal Initial Cards
+	# 4. Randomize first player (Default)
+	current_player = (randi() % num_players) + 1
+	print("Randomly selected start player: ", current_player)
+
+	# 5. Run Debug Scenarios (Overrides Random Player & Pre-seeds Cards)
+	_run_debug_scenarios()
+
+	# 6. Deal Initial Cards (Fills remainder)
 	deal_initial_cards()
 	
-	# 5. Start Game (First card to discard)
+	# 7. Start Game (First card to discard)
 	var initial_card = deck.get_top_cards(1)
 	if not initial_card.is_empty():
 		discard_pile.move_cards(initial_card)
@@ -152,11 +160,7 @@ func setup_game() -> void:
 		discard_pile.card_played.connect(_on_card_played)
 		print("DEBUG: Manager connected to DiscardPile signal (Post-Setup).")
 
-	# Randomize first player
-	current_player = (randi() % num_players) + 1
-	print("Randomly selected start player: ", current_player)
-
-	# 6. Current Player UI
+	# 8. Current Player UI
 	player_label = Label.new()
 	card_manager.add_child(player_label)
 	# Position relative to deck, which is already correctly positioned in available area
@@ -165,11 +169,14 @@ func setup_game() -> void:
 	update_turn_ui()
 	update_player_stats()
 
-	# --- Run Debug Scenarios (Overrides) ---
-	_run_debug_scenarios()
-
 var play_direction: int = 1 # 1 for clockwise, -1 for counter-clockwise
 var last_player_who_played: int = -1
+var pending_turn_skip: int = 1 # Default to 1 (Next player). Joker sets this to 2 (Skip).
+var active_effects: Dictionary = {
+	"locked": false,          # Spade 4
+	"eight_black": false,     # Black 8s
+	"eight_red": false,       # Red 8s
+}
 
 var selected_card_index = 0
 
@@ -246,8 +253,6 @@ func _on_deck_card_pressed(_card: Card) -> void:
 
 # Modified to fill hands up to the limit, allowing for pre-seeded debug cards
 func deal_initial_cards() -> void:
-	# Run debug setup first (if any)
-	_run_debug_scenarios()
 	
 	# Round-robin deal until everyone has 'num_cards_in_hand'
 	var cards_needed = true
@@ -269,10 +274,13 @@ func _run_debug_scenarios() -> void:
 	# Example: Give Player 1 (Index 0) a Heart 9
 	# debug_move_card_to_hand(0, "heart_9")
 	# debug_move_card_to_hand(1, "club_A")
-	debug_move_card_to_hand(0,"heart_9")
-	debug_move_card_to_hand(0,"club_9")
-	debug_move_card_to_hand(0,"spade_9")
-	debug_move_card_to_hand(0,"diamond_9")
+	# debug_move_card_to_hand(0,"heart_9")
+	# debug_move_card_to_hand(0,"club_9")
+	# debug_move_card_to_hand(0,"spade_9")
+	# debug_move_card_to_hand(0,"diamond_9")
+	
+	debug_move_card_to_hand(0, "joker")
+	debug_move_card_to_hand(0, "club_2")
 	
 	debug_set_starting_player(0)
 
@@ -312,9 +320,8 @@ func populate_deck() -> void:
 		return
 		
 	for card_name in card_data.keys():
-		# Exclude jokers if they exist in valid set but we want 52 cards
-		if "Joker" in card_name:
-			continue
+		# Include all cards found in factory
+			
 			
 		var card = card_manager.card_factory.create_card(card_name, deck)
 		if card == null:
@@ -366,8 +373,18 @@ func _on_card_played(card: Card) -> void:
 	
 	# Dispatch to specific effect handler
 	if card_effects.has(card.card_name):
-		print("DEBUG: Dispatching to specific handler for ", card.card_name)
-		card_effects[card.card_name].call(card)
+		# RULE: If effects are blocked (Spade 4), only Red 4s can trigger their effect (Unlock).
+		if active_effects["locked"]:
+			if card.card_name.begins_with("heart_4") or card.card_name.begins_with("diamond_4"):
+				print("DEBUG: Effect Dispatch: Red 4 Unblocker!")
+				card_effects[card.card_name].call(card)
+			else:
+				print("DEBUG: Effect Dispatch: BLOCKED by Spade 4!")
+				log_message("Effect BLOCKED by Spade 4!")
+				_effect_default(card) # Just cycle turn, no effect
+		else:
+			print("DEBUG: Dispatching to specific handler for ", card.card_name)
+			card_effects[card.card_name].call(card)
 	else:
 		print("DEBUG: Using default handler for ", card.card_name)
 		_effect_default(card)
@@ -396,12 +413,54 @@ func _register_card_effects() -> void:
 	# Specific rules by name
 	card_effects["diamond_5"] = _effect_rotate_right_1
 	card_effects["heart_5"] = _effect_rotate_left_2
+	card_effects["joker"] = _effect_joker
+	
+	card_effects["club_4"] = _effect_club_4
+	card_effects["spade_4"] = _effect_spade_4
+	card_effects["heart_4"] = _effect_red_4
+	card_effects["diamond_4"] = _effect_red_4
+	
+	# Register 8s
+	# Black 8s
+	card_effects["club_8"] = _effect_eight_black
+	card_effects["spade_8"] = _effect_eight_black
+	# Red 8s
+	card_effects["heart_8"] = _effect_eight_red
+	card_effects["diamond_8"] = _effect_eight_red
+
+	# Register all 2s for Double Play
+	for suit in suits:
+		card_effects[suit + "_2"] = _effect_play_again
 
 # Default effect: just pass the turn
 func _effect_default(_card: Card) -> void:
 	cycle_turn(1)
 
 # --- Effect Handlers ---
+
+# 2: Double Play (Play again)
+func _effect_play_again(_card: Card) -> void:
+	print("Effect: Double Play (2)")
+	log_message("Player %d plays again! (Any Card)" % current_player)
+	
+	# Enable Free Play for the follow-up card
+	discard_pile.free_play_active = true
+	
+	# Update HUD (Maybe add an icon for "Free Play" later)
+	_update_hud_effects()
+	
+	# Do NOT cycle turn.
+	# Visual feedback
+	if hud_layer:
+		var bubble = speech_bubble_scene.instantiate()
+		hud_layer.add_child(bubble)
+		var current_hand = hands_array[current_player - 1]
+		bubble.global_position = current_hand.get_global_transform_with_canvas().origin + Vector2(0, -100)
+		bubble.show_message("I play again!", 1.5)
+	
+	# TODO: Check if player has NO cards left (win) or NO valid cards (draw).
+	# Win check happens elsewhere usually check_win_condition().
+	# If he has no valid cards, he must draw. Logic to be enforced by player interaction.
 
 # Ace: Skip next player
 func _effect_skip(_card: Card) -> void:
@@ -465,6 +524,8 @@ func _on_suit_selected(suit: String) -> void:
 	# 1. Update Discard Pile Active Suit
 	discard_pile.active_suit = suit
 	
+	_update_hud_effects()
+	
 	# 2. Show Speech Bubble
 	var bubble = speech_bubble_scene.instantiate()
 	# add_child(bubble) # REMOVED: Don't add to manager directly
@@ -486,7 +547,11 @@ func _on_suit_selected(suit: String) -> void:
 	
 	# 3. Wait 2 seconds then cycle turn
 	await get_tree().create_timer(2.0).timeout
-	cycle_turn(1)
+	
+	# Cycle turn by pending amount (1 for Jack, 2 for Joker)
+	cycle_turn(pending_turn_skip)
+	# Reset back to default
+	pending_turn_skip = 1
 	
 	# Unblock input
 	discard_pile.input_disabled = false
@@ -501,6 +566,101 @@ func _effect_rotate_right_1(_card: Card) -> void:
 func _effect_rotate_left_2(_card: Card) -> void:
 	print("Effect: Rotate Hands Left 2 (5H)")
 	_rotate_hands_content(-2) # Negative for left/counter-clockwise relative to array
+	cycle_turn(1)
+
+# Joker: Draw 4 + Skip + Choose Suit
+func _effect_joker(_card: Card) -> void:
+	print("Effect: Joker (Apocalypse)")
+	log_message("Joker played! Next +4, Skip, Suit Select!")
+	
+	# 1. Next player draws 4
+	var next_player_idx = get_next_player_index(1)
+	var next_hand = hands_array[next_player_idx - 1]
+	distribute_cards(next_hand, 4)
+	
+	# 2. Skip that player (so turn moves to Player+2)
+	# BUT we also need to select a suit. 
+	# Effect Jack does NOT cycle turn immediately. It waits for UI.
+	# We should do the same here.
+	
+	# Pre-calculate the NEXT turn cycle to be +2 (Skip)
+	# But _on_suit_selected cycles by 1.
+	# We can update a flag or just handle it differently.
+	# Easier: Let's reuse logic.
+	# We can override _on_suit_selected behavior? No.
+	
+	# Let's initiate suit selection first.
+	_effect_jack(_card)
+	
+	# However, _effect_jack calls cycle_turn(1) at the end of selection.
+	# We want cycle_turn(2).
+	# This implies we need a state variable "pending_turn_skip".
+	pending_turn_skip = 2 # Set to 2 so when suit is selected, we skip.
+
+# Club 4: Clears Active Effects (8s, Kings, Queens/Direction)
+# DOES NOT clear Spade 4 Lock.
+# DOES NOT clear Jack/Joker Active Suit.
+func _effect_club_4(_card: Card) -> void:
+	print("Effect: Clear Active Effects (Club 4)")
+	log_message("Effects Cleared (8s, Direction)")
+	
+	# Clear 8s Masquerade
+	active_effects["eight_black"] = false
+	active_effects["eight_red"] = false
+	discard_pile.active_effect_eight_black = false
+	discard_pile.active_effect_eight_red = false
+	
+	# Clear Direction (Queen Effect) - Reset to Clockwise
+	play_direction = 1
+	
+	# Clear Silence (King Effect - Future)
+	# active_effects["silenced"] = false
+	
+	_update_hud_effects()
+	cycle_turn(1)
+
+# Spade 4: Locks Effects (Only Red 4s can unlock)
+func _effect_spade_4(_card: Card) -> void:
+	print("Effect: LOCK Effects (Spade 4)")
+	log_message("Effects are now LOCKED!")
+	active_effects["locked"] = true
+	_update_hud_effects()
+	cycle_turn(1)
+
+# Red 4: Unlocks Effects
+func _effect_red_4(_card: Card) -> void:
+	print("Effect: UNLOCK Effects (Red 4)")
+	if active_effects["locked"]:
+		log_message("Effects are now UNLOCKED!")
+		active_effects["locked"] = false
+	else:
+		log_message("Red 4 played (Nothing locked).")
+	_update_hud_effects()
+	cycle_turn(1)
+	
+# 8 Black: Toggle Black Masquerade
+func _effect_eight_black(_card: Card) -> void:
+	print("Effect: 8 Black (Masquerade)")
+	log_message("Black 8! Black cards swap suits!")
+	
+	# Toggle state (or set true? Usually it applies until cleared?)
+	# Rule says: "Once played, the black cards on top count as opposite."
+	# This implies it's a persistent state.
+	active_effects["eight_black"] = true
+	discard_pile.active_effect_eight_black = true
+	
+	_update_hud_effects()
+	cycle_turn(1)
+
+# 8 Red: Toggle Red Masquerade
+func _effect_eight_red(_card: Card) -> void:
+	print("Effect: 8 Red (Masquerade)")
+	log_message("Red 8! Red cards swap suits!")
+	
+	active_effects["eight_red"] = true
+	discard_pile.active_effect_eight_red = true
+	
+	_update_hud_effects()
 	cycle_turn(1)
 
 # Helper for rotation
@@ -593,6 +753,35 @@ func setup_ui() -> void:
 	pass_btn.text = "Pass Turn"
 	pass_btn.pressed.connect(_on_pass_turn_pressed)
 	hbox.add_child(pass_btn)
+	
+	# --- Effect Status Bar (Bottom Center) ---
+	# Load script directly since we don't have a scene file yet, or use class_name
+	effect_status_bar = EffectStatusBar.new()
+	hud_layer.add_child(effect_status_bar)
+	
+	# Calculate Max Height (10% of screen)
+	var bar_height = screen_size.y * 0.10
+	var bar_width = screen_size.x * 0.2 # 20% Width (Reduced from 40%)
+	
+	# Position: Bottom Left
+	effect_status_bar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	effect_status_bar.grow_horizontal = Control.GROW_DIRECTION_END # Grow Right
+	effect_status_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN # Grow Up
+	
+	# Explicit Offsets
+	var margin_side = 20.0
+	var margin_bottom = 20.0
+	
+	effect_status_bar.offset_left = margin_side
+	effect_status_bar.offset_right = margin_side + bar_width
+	effect_status_bar.offset_bottom = -margin_bottom
+	effect_status_bar.offset_top = -margin_bottom - bar_height
+	
+	# Size Constraints
+	effect_status_bar.custom_minimum_size = Vector2(bar_width, bar_height) # Force Min size
+	
+	# Initialize
+	_update_hud_effects()
 	
 	# Spacer Right
 	var spacer_right = Control.new()
@@ -709,6 +898,13 @@ func _on_pass_turn_pressed() -> void:
 	print("Pass Turn Pressed")
 	cycle_turn()
 
+func _update_hud_effects() -> void:
+	if effect_status_bar:
+		var current_suit = ""
+		if discard_pile:
+			current_suit = discard_pile.active_suit
+		effect_status_bar.update_status(active_effects, current_suit)
+		
 # --- Options Menu Callbacks ---
 func _on_settings_pressed() -> void:
 	if options_menu:
