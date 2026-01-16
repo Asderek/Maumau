@@ -27,7 +27,7 @@ extends CardContainer
 
 @export_group("hand_meta_info")
 ## maximum number of cards that can be held.
-@export var max_hand_size := CardFrameworkSettings.LAYOUT_MAX_HAND_SIZE
+@export var max_hand_size := 100
 ## maximum spread of the hand.
 @export var max_hand_spread := CardFrameworkSettings.LAYOUT_MAX_HAND_SPREAD
 ## whether the card is face up.
@@ -279,3 +279,15 @@ func remove_card(card: Card) -> bool:
 	# Also clear helper display just in case
 	card.set_helper_display(false) 
 	return super.remove_card(card)
+
+
+func check_card_can_be_dropped(cards: Array) -> bool:
+	if not is_active_hand:
+		return false
+	return super.check_card_can_be_dropped(cards)
+
+
+func can_accept_card(card: Card) -> bool:
+	if not is_active_hand:
+		return false
+	return super.can_accept_card(card)
