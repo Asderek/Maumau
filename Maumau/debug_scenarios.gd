@@ -18,7 +18,26 @@ func run_debug_scenarios(manager: Node) -> void:
 	
 	#_scenario_dobrando(manager)
 	
-	_scenario_666(manager)
+	# _scenario_666(manager)
+	
+	_scenario_wanwan_8_test(manager)
+	
+func _scenario_wanwan_8_test(manager: Node) -> void:
+	# Discard: Club 3
+	_move_card_to_discard(manager, "club_3")
+	
+	# P1 Hand: Club 8, Any 2, Any Q, Any J, Any 8
+	var hand_cards = ["club_8", "diamond_2", "heart_Q", "spade_J", "heart_8"]
+	for c_name in hand_cards:
+		_move_card_to_hand(manager, 0, c_name)
+		
+	# Set P1 to Start
+	_set_starting_player(manager, 0)
+	
+	# Force Wan Wan Mode for P1
+	if manager.has_method("_set_player_mode"):
+		manager._set_player_mode(1, "WAN_WAN") # Use String literal or manager.MODE_WANWAN if accessible
+		print("DEBUG: Forced P1 to WAN_WAN mode")
 
 
 # --- Scenario Definitions ---

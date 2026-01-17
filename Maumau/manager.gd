@@ -1,11 +1,15 @@
 extends Node
 
+const MODE_MAUMAU = "MAU_MAU"
+const MODE_WANWAN = "WAN_WAN"
+
 @export var num_players = 1;
 @export var num_cards_in_hand = 5;
 @export var current_player: int = 1;
 @export var hand_scene: PackedScene;
 @onready var card_manager := $CardManager;
 var hands_array: Array[Hand] = [];
+var player_modes: Dictionary = {}
 
 # Called when the node enters the scene tree for the first time.
 @export var deck_scene: PackedScene = preload("res://addons/card-framework/pile.tscn")
@@ -157,7 +161,10 @@ func setup_game() -> void:
 	# 6. Deal Initial Cards (Fills remainder)
 	deal_initial_cards()
 	
-	# 7. Start Game (First card to discard)
+	# 7. Roll for Game Modes (Mau Mau vs Wan Wan)
+	_roll_initial_modes()
+	
+	# 8. Start Game (First card to discard)
 	# Only if not already set by debug
 	if discard_pile.get_card_count() == 0:
 		var initial_card = deck.get_top_cards(1)
@@ -446,22 +453,31 @@ func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 	log_message("Player %d played %s" % [current_player, card.card_name.replace("_", " ").capitalize()])
 	
 	# Dispatch to specific effect handler
+	var was_swap_active = active_effects.get("swap_next_mode", false)
+	if was_swap_active:
+		print("DEBUG: Swap Mode Active for this card!")
+		
 	if card_effects.has(card.card_name):
 		# RULE: If effects are blocked (Spade 4), only Red 4s can trigger their effect (Unlock).
-		if active_effects["locked"]:
+		if active_effects.get("locked", false):
 			if card.card_name.begins_with("heart_4") or card.card_name.begins_with("diamond_4"):
 				print("DEBUG: Effect Dispatch: Red 4 Unblocker!")
 				card_effects[card.card_name].call(card)
 			else:
 				print("DEBUG: Effect Dispatch: BLOCKED by Spade 4!")
 				log_message("Effect BLOCKED by Spade 4!")
-				_effect_default(card) # Just cycle turn, no effect
+				_effect_default(card)
 		else:
 			print("DEBUG: Dispatching to specific handler for ", card.card_name)
 			card_effects[card.card_name].call(card)
 	else:
 		print("DEBUG: Using default handler for ", card.card_name)
 		_effect_default(card)
+		
+	# Cleanup Swap Mode (Consumed)
+	if was_swap_active:
+		active_effects["swap_next_mode"] = false
+		log_message("Mode Swap consumed.")
 
 
 # --- Card Effect System ---
@@ -487,7 +503,7 @@ func _register_card_effects() -> void:
 				"A": card_effects[card_name] = _effect_skip
 				"7": card_effects[card_name] = _effect_draw_2_skip
 				"9": card_effects[card_name] = _effect_draw_last_player
-				"Q": card_effects[card_name] = _effect_reverse
+				"Q": card_effects[card_name] = _effect_queen_proxy
 				"J": card_effects[card_name] = _effect_jack
 				"6": card_effects[card_name] = _effect_six
 				"10": card_effects[card_name] = _effect_ten
@@ -512,12 +528,11 @@ func _register_card_effects() -> void:
 	
 	# Register 8s
 	if GameGlobals.is_rule_active("8"):
-		# Black 8s
-		card_effects["club_8"] = _effect_eight_black
-		card_effects["spade_8"] = _effect_eight_black
-		# Red 8s
-		card_effects["heart_8"] = _effect_eight_red
-		card_effects["diamond_8"] = _effect_eight_red
+		# All 8s go to Proxy
+		card_effects["club_8"] = _effect_eight_proxy
+		card_effects["spade_8"] = _effect_eight_proxy
+		card_effects["heart_8"] = _effect_eight_proxy
+		card_effects["diamond_8"] = _effect_eight_proxy
 
 	# Register all 2s for Double Play
 	if GameGlobals.is_rule_active("2"):
@@ -775,15 +790,108 @@ func _effect_six(_card: Card) -> void:
 		log_message("Player %d played a 6..." % current_player)
 		cycle_turn(1)
 
-# Q: Reverse direction
-func _effect_reverse(_card: Card) -> void:
-	print("Effect: Reverse (Q)")
+# Q: Queen Proxy (Dispatches based on Mode)
+func _effect_queen_proxy(card: Card) -> void:
+	var mode = _get_effective_mode(current_player)
+	if mode == MODE_WANWAN:
+		_effect_queen_wanwan(card)
+	else:
+		_effect_queen_maumau(card)
+
+# Q (Maumau): Reverse direction
+func _effect_queen_maumau(_card: Card) -> void:
+	print("Effect: Reverse (Q) [MAU MAU]")
 	log_message("Effect: Direction Reversed!")
 	play_direction *= -1
 	_update_hud_effects()
 	cycle_turn(1)
 	
-# J: Wildcard with Suit Selection
+# Q (Wan Wan): Target Player -> Die Roll -> Mode Switch
+func _effect_queen_wanwan(_card: Card) -> void:
+	print("Effect: Queen (Q) [WAN WAN]")
+	log_message("Wan Wan Queen! Choose a victim to roll!")
+	
+	# Block input
+	discard_pile.input_disabled = true
+	
+	# Show Player Selector
+	_show_player_selector()
+
+func _show_player_selector() -> void:
+	# Quick Procedural UI
+	var popup = PanelContainer.new()
+	popup.name = "PlayerSelector"
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.0, 0.0, 0.9)
+	style.border_width_bottom = 2
+	style.border_color = Color.RED
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	popup.add_theme_stylebox_override("panel", style)
+	
+	# 1. Main Container (Padding)
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	popup.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 20)
+	margin.add_child(vbox)
+	
+	var label = Label.new()
+	label.text = "CHOOSE A VICTIM"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(label)
+	
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 15)
+	grid.add_theme_constant_override("v_separation", 15)
+	vbox.add_child(grid)
+	
+	for i in range(1, num_players + 1):
+		# Don't target self? User didn't specify. Assuming allow all.
+		# Note: "He targets one player". Usually can target self.
+		var btn = Button.new()
+		btn.text = "Player %d" % i
+		btn.custom_minimum_size = Vector2(100, 60) # Bigger buttons
+		btn.pressed.connect(func(): _on_player_selected(i, popup))
+		grid.add_child(btn)
+		
+	hud_layer.add_child(popup)
+	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
+	# Force layout update?
+	# popup.offset_top = 0 ... preset should handle it.
+	
+func _on_player_selected(target_idx: int, popup: Control) -> void:
+	popup.queue_free()
+	log_message("Player %d selected Player %d!" % [current_player, target_idx])
+	
+	# Roll Die for Target
+	var val = randi() % 6 + 1
+	show_dice_roll(target_idx, val)
+	
+	# Apply Mode Change
+	if val % 2 == 0:
+		_set_player_mode(target_idx, MODE_MAUMAU)
+	else:
+		_set_player_mode(target_idx, MODE_WANWAN)
+		
+	# Wait for roll? User said "whatever" for now.
+	# But we need to resume turn.
+	await get_tree().create_timer(3.0).timeout
+	
+	discard_pile.input_disabled = false
+	cycle_turn(1)
 func _effect_jack(_card: Card) -> void:
 	_print_game_event("Effect Triggered", "Jack/Joker Suit Selection")
 	log_message("Player %d is choosing a suit..." % current_player)
@@ -979,23 +1087,50 @@ func _effect_red_4(_card: Card) -> void:
 	_update_hud_effects()
 	cycle_turn(1)
 	
-# 8 Black: Toggle Black Masquerade
-func _effect_eight_black(_card: Card) -> void:
-	print("Effect: 8 Black (Masquerade)")
+# 8 (Proxy)
+func _effect_eight_proxy(card: Card) -> void:
+	var mode = _get_effective_mode(current_player)
+	
+	if mode == MODE_WANWAN:
+		_effect_eight_wanwan(card)
+	else:
+		# Mau Mau: Black vs Red
+		# Check suit
+		if card.card_name.contains("club") or card.card_name.contains("spade"):
+			_effect_eight_maumau_black(card)
+		else:
+			_effect_eight_maumau_red(card)
+
+# 8 (Wan Wan): Free Turn + Swap Next Mode
+func _effect_eight_wanwan(_card: Card) -> void:
+	print("Effect: 8 (Wan Wan)")
+	log_message("Wan Wan 8! Play again, next effect is SWAPPED!")
+	
+	active_effects["swap_next_mode"] = true
+	discard_pile.free_play_active = true
+	_update_hud_effects()
+	
+	# Do NOT cycle turn
+	# Visual feedback
+	if hud_layer:
+		var bubble = speech_bubble_scene.instantiate()
+		hud_layer.add_child(bubble)
+		bubble.show_message("Paradigm Shift!", 1.5)
+
+# 8 Black (Mau Mau): Toggle Black Masquerade
+func _effect_eight_maumau_black(_card: Card) -> void:
+	print("Effect: 8 Black (Masquerade) [MAU MAU]")
 	log_message("Black 8! Black cards swap suits!")
 	
-	# Toggle state (or set true? Usually it applies until cleared?)
-	# Rule says: "Once played, the black cards on top count as opposite."
-	# This implies it's a persistent state.
 	active_effects["eight_black"] = true
 	discard_pile.active_effect_eight_black = true
 	
 	_update_hud_effects()
 	cycle_turn(1)
 
-# 8 Red: Toggle Red Masquerade
-func _effect_eight_red(_card: Card) -> void:
-	print("Effect: 8 Red (Masquerade)")
+# 8 Red (Mau Mau): Toggle Red Masquerade
+func _effect_eight_maumau_red(_card: Card) -> void:
+	print("Effect: 8 Red (Masquerade) [MAU MAU]")
 	log_message("Red 8! Red cards swap suits!")
 	
 	active_effects["eight_red"] = true
@@ -1415,14 +1550,74 @@ func _input(event: InputEvent) -> void:
 		for p_idx in range(1, num_players + 1):
 			var val = randi() % 6 + 1
 			show_dice_roll(p_idx, val)
+			# Re-evaluated modes on debug roll if desired? 
+			# User said: "On a even... mau mau, on a odd... wan wan".
+			# Does 'D' debug roll trigger mode change? User: "When the game starts all players roll... (function 'D')... we'll need to store the value".
+			# So yes, 'D' should update mode? Or creates separate function?
+			# Let's update mode here to verify behavior dynamically.
+			if val % 2 == 0:
+				_set_player_mode(p_idx, MODE_MAUMAU)
+			else:
+				_set_player_mode(p_idx, MODE_WANWAN)
 			
 	# Debug: Roll Die for specific player (1-9)
 	elif event.keycode >= KEY_0 and event.keycode <= KEY_9:
 		var p_idx = event.keycode - KEY_0
 		if p_idx >= 1 and p_idx <= num_players:
-			log_message("Debug: Rolling die for Player %d" % p_idx)
+			# Update mode for specific player too
 			var val = randi() % 6 + 1
 			show_dice_roll(p_idx, val)
+			if val % 2 == 0:
+				_set_player_mode(p_idx, MODE_MAUMAU)
+			else:
+				_set_player_mode(p_idx, MODE_WANWAN)
+
+func _get_effective_mode(p_idx: int) -> String:
+	var base_mode = player_modes.get(p_idx, MODE_MAUMAU)
+	var swap_active = active_effects.get("swap_next_mode", false)
+	
+	if not swap_active:
+		return base_mode
+		
+	# Invert
+	if base_mode == MODE_MAUMAU:
+		return MODE_WANWAN
+	else:
+		return MODE_MAUMAU
+
+# --- Wan Wan / Game Mode Logic ---
+
+func _roll_initial_modes() -> void:
+	log_message("Rolling for Game Modes...")
+	# Wait a bit for UI to settle?
+	await get_tree().create_timer(1.0).timeout
+	
+	for p_idx in range(1, num_players + 1):
+		var val = randi() % 6 + 1
+		show_dice_roll(p_idx, val)
+		
+		if val % 2 == 0:
+			_set_player_mode(p_idx, MODE_MAUMAU)
+		else:
+			_set_player_mode(p_idx, MODE_WANWAN)
+			
+func _set_player_mode(p_idx: int, mode: String) -> void:
+	player_modes[p_idx] = mode
+	# print("Player %d is now in %s mode" % [p_idx, mode])
+	_update_player_mode_ui(p_idx)
+
+func _update_player_mode_ui(p_idx: int) -> void:
+	if p_idx < 1 or p_idx > player_labels.size(): return
+	
+	var label = player_labels[p_idx - 1]
+	var mode = player_modes.get(p_idx, MODE_MAUMAU)
+	
+	if mode == MODE_MAUMAU:
+		label.modulate = Color.WHITE
+		label.text = "Player %d (MAU)" % p_idx
+	else:
+		label.modulate = Color(1.0, 0.2, 0.2) # Red
+		label.text = "Player %d (WAN)" % p_idx
 
 func show_dice_roll(player_idx: int, value: int) -> void:
 	if not die_scene: return
@@ -1434,7 +1629,7 @@ func show_dice_roll(player_idx: int, value: int) -> void:
 	# Add to HUD
 	if hud_layer:
 		hud_layer.add_child(die)
-		die.scale = Vector2(0.4, 0.4) # Small (20% of previous 2.0)
+		die.scale = Vector2(0.6, 0.6) # Small (30% of previous 2.0)
 	else:
 		return
 	
@@ -1464,4 +1659,6 @@ func show_dice_roll(player_idx: int, value: int) -> void:
 		die.roll(value)
 		
 	# Cleanup after 4 seconds
-	get_tree().create_timer(4.0).timeout.connect(func(): die.queue_free())
+	get_tree().create_timer(4.0).timeout.connect(func(): 
+		if is_instance_valid(die): die.queue_free()
+	)
