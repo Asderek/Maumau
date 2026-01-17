@@ -49,7 +49,11 @@ extends CardContainer
 ## If true, only swap the positions of two cards when reordering (a <-> b), otherwise shift the range (default behavior).
 @export var swap_only_on_reorder := false
 ## If true, allows interaction even if is_active_hand is false (e.g. for stealing cards).
-@export var allow_remote_interaction := false
+@export var allow_remote_interaction := false:
+	set(value):
+		allow_remote_interaction = value
+		# Refresh interaction status of cards
+		set_active(is_active_hand)
 
 
 var vertical_partitions_from_outside = []

@@ -3,7 +3,7 @@ extends Pile
 
 @onready var Alert = get_node_or_null("Alert")
 
-signal card_played(card: Card)
+signal card_played(card: Card, player_index: int)
 
 # The active suit that must be followed. Defaults to the top card's suit.
 var active_suit: String = ""
@@ -22,6 +22,15 @@ var penalty_type: String = "" # "7" or "joker"
 var free_play_active: bool = false
 
 func add_card(card: Card, index: int = -1) -> void:
+	# Capture the player who played this card (Source Hand)
+	var player_index = -1
+	var manager = card_manager.get_parent()
+	if manager and card.card_container:
+		if manager.hands_array:
+			var hand_idx = manager.hands_array.find(card.card_container)
+			if hand_idx != -1:
+				player_index = hand_idx + 1 # 1-based index
+	
 	super.add_card(card, index)
 	# Default behavior: active suit resets to empty.
 	# Normal matching checks the card itself (Step 5).
@@ -29,27 +38,48 @@ func add_card(card: Card, index: int = -1) -> void:
 	active_suit = ""
 	
 	# If this was a free play, consume it.
-	# BUT wait, the CARD played usually sets new rules.
-	# The effect of the "2" (free play) was set by the PREVIOUS card.
-	# So if we just played a standard card on top of a 2, we consume the flag.
 	if free_play_active:
 		print("DEBUG: Consuming Free Play.")
 		free_play_active = false
 	
-	print("DEBUG: Emit card_played signal for ", card.card_name, " | Active Suit: ", active_suit)
-	card_played.emit(card)
+	print("DEBUG: Emit card_played signal for ", card.card_name, " | Player: ", player_index)
+	card_played.emit(card, player_index)
 
 
 func _card_can_be_added(_cards: Array) -> bool:
 	if input_disabled:
 		return false
 		
-	var top = get_top_cards(1)	
-	
 	if _cards.is_empty():
 		return false
 
-	var candidate = _cards[0]
+	var card = _cards[0]
+	var manager = card_manager.get_parent()
+	
+	# --- Turn Validation & Jump-In Check ---
+	# We must check if the player playing the card is the current player.
+	# If not, we check if it's a valid Jump-In.
+	if manager and card.card_container:
+		var hand_index = -1
+		if manager.hands_array:
+			hand_index = manager.hands_array.find(card.card_container)
+			
+		if hand_index != -1:
+			var player_id = hand_index + 1
+			if player_id != manager.current_player:
+				# Not my turn. Check Jump-In.
+				var top_list = get_top_cards(1)
+				if top_list.is_empty(): return false # Can't jump in on empty
+				
+				var top_card = top_list[0]
+				if _is_jump_in_valid(card, top_card):
+					# Continue to Card Validation (Must still match suit/rank, which it does if Identical)
+					pass 
+				else:
+					if Alert: Alert.text = "Espere sua vez!"
+					return false
+	var top = get_top_cards(1)
+	var candidate = card	
 	var candidate_suit = candidate.card_info["suit"]
 	var candidate_value = candidate.card_info["value"]
 
@@ -160,3 +190,17 @@ func _get_effective_suit(base_suit: String) -> String:
 		if base_suit == "diamond": return "heart"
 		
 	return base_suit
+
+
+func _is_jump_in_valid(card: Card, top_card: Card) -> bool:
+	if not GameGlobals.is_rule_active("jump_in"):
+		return false
+		
+	# Exact Match Strategy (Requires Double Deck)
+	# Same Suit AND Same Rank
+	
+	# 1. Compare Names (e.g. "heart_7" == "heart_7")
+	if card.card_name == top_card.card_name:
+		return true
+		
+	return false

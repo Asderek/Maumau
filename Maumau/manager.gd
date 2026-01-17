@@ -107,6 +107,9 @@ func setup_game() -> void:
 		# Configure Hand
 		hand.max_hand_spread = 400
 		hand.card_face_up = true # DEBUG: All cards face up
+		
+		# Set Interaction Mode based on Jump-In Rule
+		hand.allow_remote_interaction = GameGlobals.is_rule_active("jump_in")
 		#if player == 0:
 		#	hand.card_face_up = true
 		#else:
@@ -173,6 +176,8 @@ func setup_game() -> void:
 
 var play_direction: int = 1 # 1 for clockwise, -1 for counter-clockwise
 var last_player_who_played: int = -1
+# History of last 3 plays: [{ "card_name": String, "player": int, "card_ref": Card }]
+var play_history: Array = [] 
 var pending_turn_skip: int = 1 # Default to 1 (Next player). Joker sets this to 2 (Skip).
 var active_effects: Dictionary = {
 	"locked": false,          # Spade 4
@@ -381,21 +386,48 @@ func populate_deck() -> void:
 		push_error("No cards preloaded! Check CardFactory configuration.")
 		return
 		
-	for card_name in card_data.keys():
-		# Include all cards found in factory
-			
-			
-		var card = card_manager.card_factory.create_card(card_name, deck)
-		if card == null:
-			push_error("Failed to create card: " + card_name)
+	for i in range(2): # Double Deck
+		for card_name in card_data.keys():
+			# Include all cards found in factory
+			var card = card_manager.card_factory.create_card(card_name, deck)
+			if card == null:
+				push_error("Failed to create card: " + card_name)
 
-	print("Deck populated with ", deck.get_card_count(), " cards.")
-
+	print("Deck populated with ", deck.get_card_count(), " cards (Double Deck).")
 
 
 
-func _on_card_played(card: Card) -> void:
+
+func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 	_print_game_event("Plays Card", card.card_name)
+	
+	# Detect Jump-In (Out of Turn Play)
+	var is_jump_in = false
+	if player_source_index != -1 and player_source_index != current_player:
+		is_jump_in = true
+		print("DEBUG: JUMP-IN DETECTED! Player ", player_source_index, " stole the turn from ", current_player)
+		log_message("!!! PLAYER %d JUMPED IN !!!" % player_source_index)
+		current_player = player_source_index
+		
+	# Optionally: Add visual flair here
+		# ...
+	
+	# --- Update Play History (Last 3 Cards) ---
+	var history_player = current_player
+	if player_source_index != -1:
+		history_player = player_source_index
+		
+	var play_event = {
+		"card": card,
+		"card_name": card.card_name,
+		"player": history_player
+	}
+	play_history.append(play_event)
+	if play_history.size() > 3:
+		play_history.pop_front()
+		
+	print("DEBUG: History Updated: ", play_history.map(func(x): return str(x.player) + ":" + x.card_name))
+
 	log_message("Player %d played %s" % [current_player, card.card_name.replace("_", " ").capitalize()])
 	
 	# Dispatch to specific effect handler
@@ -473,6 +505,14 @@ func _register_card_effects() -> void:
 	if GameGlobals.is_rule_active("2"):
 		for suit in suits:
 			card_effects[suit + "_2"] = _effect_play_again
+			
+	# --- Update Interaction based on Jump-In Rule ---
+	# If Jump-In is enabled, players must be able to drag cards out of turn.
+	var jump_in_active = GameGlobals.is_rule_active("jump_in")
+	if hands_array:
+		for hand in hands_array:
+			hand.allow_remote_interaction = jump_in_active
+			# If interaction was disabled by set_active(false), this override re-enables it.
 
 # Default effect: just pass the turn
 # Default effect: just pass the turn
@@ -530,14 +570,62 @@ func _effect_draw_2_skip(_card: Card) -> void:
 	cycle_turn(1, true)
 
 # 9: Last player who played draws 1
+# 9: Last player who played draws 1 (Stacking allowed via History)
 func _effect_draw_last_player(_card: Card) -> void:
 	print("Effect: Last Player Draws (9)")
-	log_message("Effect: Last player draws 1 card!")
-	if last_player_who_played != -1:
-		var target_hand = hands_array[last_player_who_played - 1]
-		distribute_cards(target_hand, 1)
-	else:
-		print("No previous player to punish!")
+	
+	if play_history.size() < 2:
+		print("History too short to apply Rule 9.")
+		cycle_turn(1)
+		return
+
+	# 1. Calculate Stacking Streak
+	# Count how many contiguous 9s are at the end of history
+	var streak = 0
+	for i in range(play_history.size() - 1, -1, -1):
+		var hist_card_name = play_history[i].card_name
+		if "9" in hist_card_name: # Simple check for rank 9
+			streak += 1
+		else:
+			break
+			
+	var amount_to_draw = streak
+	
+	# 2. Identify Target
+	# The target is likely the player of the PREVIOUS card in history.
+	# Example: [P1:5, P2:9 (Current)]. Target P1. Amount 1.
+	# Example: [P1:5, P2:9, P4:9 (Current)]. Target P2. Amount 2.
+	
+	# EXCEPTION: Self-Doubling (P2 plays 9, then P2 jumps in with 9)
+	# Logic: [P1:5, P2:9, P2:9]. 
+	# Default logic would target P2 (index -2). This is self-punishment.
+	# User Rule: In this case, target P1 (index -3).
+	
+	var target_index_in_history = play_history.size() - 2
+	
+	if play_history.size() >= 2:
+		var last_player_idx = play_history[play_history.size() - 1].player
+		var prev_player_idx = play_history[play_history.size() - 2].player
+		
+		# Check for Self-Double (Same player played last 2 cards)
+		if last_player_idx == prev_player_idx and "9" in play_history[play_history.size() - 1].card_name:
+			# Self-Double Detected involving current card
+			target_index_in_history = play_history.size() - 3
+			print("DEBUG: Self-Doubling 9 detected! Redirecting target to history[-3].")
+
+	if target_index_in_history < 0:
+		print("History too short for Rule 9 target calculation (Start of Game?).")
+		cycle_turn(1)
+		return
+
+	var target_entry = play_history[target_index_in_history]
+	var target_player_idx = target_entry.player
+	
+	log_message("Effect: Player %d draws %d card(s)! (Rule 9)" % [target_player_idx, amount_to_draw])
+	
+	var target_hand = hands_array[target_player_idx - 1]
+	distribute_cards(target_hand, amount_to_draw)
+	
 	cycle_turn(1)
 
 # Q: Reverse direction
