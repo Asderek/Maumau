@@ -301,8 +301,18 @@ func handle_highlight() -> void:
 		return # Exit after clearing.
 
 	# Check if any card is currently being dragged (held)
-	var dragged_cards = card_manager.current_dragged_cards
-	var is_dragging = not dragged_cards.is_empty()
+	var all_dragged_cards = card_manager.current_dragged_cards
+	
+	# FILTER: Only validate cards that are genuinely being held by the mouse.
+	# "Ghosts" can appear if an effect interrupts a drag (like Silence Broken or Turn Mismatch) 
+	# and the card_manager list doesn't clear instantly.
+	var dragged_cards = []
+	for c in all_dragged_cards:
+		if c.current_state == c.DraggableState.HOLDING:
+			dragged_cards.append(c)
+	
+	# Failsafe: Only consider dragging if Mouse Left is actually pressed.
+	var is_dragging = not dragged_cards.is_empty() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	
 	# Handle Highlight for Discard Pile
 	var discard_top_cards = discard_pile.get_top_cards(1)
@@ -310,9 +320,14 @@ func handle_highlight() -> void:
 		var top_card = discard_top_cards[0]
 		# Only highlight if dragging
 		if is_dragging:
-			# Use logic-only check (ignores mouse position) to show valid target immediately
-			var can_accept = discard_pile._card_can_be_added(dragged_cards)
-			top_card.set_helper_display(true, can_accept)
+			
+			# Priority 1: If input is disabled (e.g. Suit Selection open), hide highlight.
+			# Priority 2: If Silence is active, hide highlight.
+			if discard_pile.input_disabled or active_effects.get("silence", false):
+				top_card.set_helper_display(false)
+			else:
+				var can_accept = discard_pile._card_can_be_added(dragged_cards)
+				top_card.set_helper_display(true, can_accept)
 
 
 func cycle_turn(steps: int = 1, played_card: bool = false) -> void:
@@ -1103,9 +1118,7 @@ func update_player_stats() -> void:
 		return # Mismatch or not ready
 		
 	for i in range(hands_array.size()):
-		var count = hands_array[i].get_card_count()
-		var p_index = i + 1
-		player_labels[i].text = "Player %d (%d)" % [p_index, count]
+		_update_player_mode_ui(i + 1)
 
 func _on_pass_turn_pressed() -> void:
 	print("Pass Turn Pressed")
@@ -1307,6 +1320,10 @@ func _update_player_mode_ui(p_idx: int) -> void:
 		var count = items.count("mirror_force")
 		if count > 1:
 			text += "x%d" % count
+			
+	# Show Card Count
+	var hand_count = hands_array[p_idx - 1].get_card_count()
+	text += " (%d)" % hand_count
 			
 	label.text = text
 

@@ -3,6 +3,9 @@ extends RefCounted
 
 # Main entry point for running debug setups
 func run_debug_scenarios(manager: Node) -> void:
+	# --- SCENARIO: Critical Effects (User Requested) ---
+	_scenario_critical_effects(manager)
+	
 	# --- SCENARIO: Spade 4 (Lock) vs Joker ---
 	# _set_starting_player(manager,0) # Kept for reference
 	
@@ -25,6 +28,30 @@ func run_debug_scenarios(manager: Node) -> void:
 	# _scenario_ace_steal_test(manager)
 	# _scenario_diamond_flush(manager)
 	pass
+
+func _scenario_critical_effects(manager: Node) -> void:
+	print("DEBUG: Setting up Critical Effects Scenario")
+	
+	# Discard: Club 3
+	_move_card_to_discard(manager, "club_3")
+	
+	# Player 1 (Index 0): [Spade Jack, Club Queen, Club King, Joker Black, Club 6, Club 8, Club Ace]
+	var p1_cards = ["spade_J", "club_Q", "club_K", "joker_black", "club_6", "club_8", "club_A"]
+	for c in p1_cards:
+		_move_card_to_hand(manager, 0, c)
+		
+	# Player 2 (Index 1): [Joker Red, Club Jack]
+	if manager.hands_array.size() > 1:
+		var p2_cards = ["joker_red", "club_J", "spade_K"]
+		for c in p2_cards:
+			_move_card_to_hand(manager, 1, c)
+			
+	_move_card_to_hand(manager, 2, "spade_J")
+	_move_card_to_hand(manager, 2, "club_J")
+			
+	# Set Starter
+	_set_starting_player(manager, 0)
+
 
 func _scenario_ace_steal_test(manager: Node) -> void:
 	# Set Hand Size to 3

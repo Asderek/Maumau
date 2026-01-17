@@ -87,6 +87,7 @@ func _card_can_be_added(_cards: Array) -> bool:
 					pass 
 				else:
 					if Alert: Alert.text = "Espere sua vez!"
+					print("DEBUG: Turn Mismatch! Current: %d, Player: %d" % [manager.current_player, player_id])
 					return false
 	var top = get_top_cards(1)
 	var candidate = card	
@@ -180,11 +181,6 @@ func _card_can_be_added(_cards: Array) -> bool:
 		# Determine effective suits for Top Card (The "Table" State)
 		var effective_top_suit = _get_effective_suit(top_suit)
 		
-		# LOGIC FIX: Determine match against PHYSICAL candidate
-		# "Heart on Heart is illegal" (Red 8 Active: Heart->Diamond).
-		# Top: Heart (Eff: Diamond). Candidate: Heart. Match? No.
-		# Top: Heart (Eff: Diamond). Candidate: Diamond. Match? Yes.
-		
 		if candidate_suit == effective_top_suit:
 			return true
 		
@@ -192,6 +188,7 @@ func _card_can_be_added(_cards: Array) -> bool:
 			return true
 			
 		if Alert: Alert.text = "Naipe ou Valor incompativel."
+		print("DEBUG: Standard Validation Failed. Top: %s (Eff: %s), Cand: %s" % [top_suit, effective_top_suit, candidate_suit])
 		return false
 		
 	return true

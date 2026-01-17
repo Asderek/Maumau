@@ -18,11 +18,14 @@ static func _execute_wanwan(manager: Node, _card: Node) -> void:
 
 static func _execute_maumau(manager: Node, _card: Node) -> void:
 	print("Effect: Silence (King) [MAU MAU]")
-	# Implementation of Silence (Visual/Logic)
-	# For now, just logging and cycle.
-	# "Prevents anyone from speaking" is a meta-rule, often enforced physically.
-	# But we can add a visual indicator "SILENCE!"
-	manager.active_effects["silence"] = true # Helper for UI/Logic
-	manager.log_message("SILENCE! King commands quiet.")
+	
+	var is_silent = manager.active_effects["silence"]
+	manager.active_effects["silence"] = not is_silent
+	
+	if not is_silent:
+		manager.log_message("SILENCE! King commands quiet.")
+	else:
+		manager.log_message("The King speaks! Silence lifted.")
+		
 	manager._update_hud_effects()
 	manager.cycle_turn(1)
