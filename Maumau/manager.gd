@@ -10,6 +10,7 @@ const MODE_WANWAN = "WAN_WAN"
 @onready var card_manager := $CardManager;
 var hands_array: Array[Hand] = [];
 var player_modes: Dictionary = {}
+var player_items: Dictionary = {} # Map[player_idx] -> Array[String] (e.g. "mirror_force")
 
 # Called when the node enters the scene tree for the first time.
 @export var deck_scene: PackedScene = preload("res://addons/card-framework/pile.tscn")
@@ -21,6 +22,21 @@ var suit_selector_scene: PackedScene = preload("res://Maumau/suit_selector.tscn"
 var speech_bubble_scene: PackedScene = preload("res://Maumau/speech_bubble.tscn")
 var die_scene: PackedScene = preload("res://Maumau/die.tscn")
 var simon_popup: Control
+
+# Effect Modules
+const AceEffect = preload("res://Maumau/effects/ace_effect.gd")
+const TwoEffect = preload("res://Maumau/effects/two_effect.gd")
+const FourEffect = preload("res://Maumau/effects/four_effect.gd")
+const FiveEffect = preload("res://Maumau/effects/five_effect.gd")
+const SevenEffect = preload("res://Maumau/effects/seven_effect.gd")
+const EightEffect = preload("res://Maumau/effects/eight_effect.gd")
+const NineEffect = preload("res://Maumau/effects/nine_effect.gd")
+const TenEffect = preload("res://Maumau/effects/ten_effect.gd")
+const JackEffect = preload("res://Maumau/effects/jack_effect.gd")
+const QueenEffect = preload("res://Maumau/effects/queen_effect.gd")
+const KingEffect = preload("res://Maumau/effects/king_effect.gd")
+const JokerEffect = preload("res://Maumau/effects/joker_effect.gd")
+const SixEffect = preload("res://Maumau/effects/six_effect.gd")
 
 var player_labels: Array[Label] = []
 
@@ -500,44 +516,42 @@ func _register_card_effects() -> void:
 				continue # Skip registration (Effect defaults to Pass)
 			
 			match value:
-				"A": card_effects[card_name] = _effect_skip
-				"7": card_effects[card_name] = _effect_draw_2_skip
-				"9": card_effects[card_name] = _effect_draw_last_player
-				"Q": card_effects[card_name] = _effect_queen_proxy
-				"J": card_effects[card_name] = _effect_jack
-				"6": card_effects[card_name] = _effect_six
-				"10": card_effects[card_name] = _effect_ten
-				"K": card_effects[card_name] = _effect_king
+				"A": card_effects[card_name] = func(c): AceEffect.execute(self, c)
+				"7": card_effects[card_name] = func(c): SevenEffect.execute(self, c)
+				"9": card_effects[card_name] = func(c): NineEffect.execute(self, c)
+				"Q": card_effects[card_name] = func(c): QueenEffect.execute(self, c)
+				"J": card_effects[card_name] = func(c): JackEffect.execute(self, c)
+				"6": card_effects[card_name] = func(c): SixEffect.execute(self, c)
+				"10": card_effects[card_name] = func(c): TenEffect.execute(self, c)
+				"K": card_effects[card_name] = func(c): KingEffect.execute(self, c)
 				
 	# Specific rules by name
 	if GameGlobals.is_rule_active("5"):
-		card_effects["diamond_5"] = _effect_rotate_right_1
-		card_effects["heart_5"] = _effect_rotate_left_2
+		card_effects["diamond_5"] = func(c): FiveEffect.execute_diamond(self, c)
+		card_effects["heart_5"] = func(c): FiveEffect.execute_heart(self, c)
 	
 	# Jokers
 	if GameGlobals.is_rule_active("joker"):
-		card_effects["joker_red"] = _effect_joker
-		card_effects["joker_black"] = _effect_joker
+		card_effects["joker_red"] = func(c): JokerEffect.execute(self, c)
+		card_effects["joker_black"] = func(c): JokerEffect.execute(self, c)
 	
 	# 4s (Lock & Unlock)
 	if GameGlobals.is_rule_active("4"):
-		card_effects["club_4"] = _effect_club_4
-		card_effects["spade_4"] = _effect_spade_4
-		card_effects["heart_4"] = _effect_red_4
-		card_effects["diamond_4"] = _effect_red_4
+		card_effects["club_4"] = func(c): FourEffect.execute_club(self, c)
+		card_effects["spade_4"] = func(c): FourEffect.execute_spade(self, c)
+		card_effects["heart_4"] = func(c): FourEffect.execute_red(self, c)
+		card_effects["diamond_4"] = func(c): FourEffect.execute_red(self, c)
 	
 	# Register 8s
 	if GameGlobals.is_rule_active("8"):
-		# All 8s go to Proxy
-		card_effects["club_8"] = _effect_eight_proxy
-		card_effects["spade_8"] = _effect_eight_proxy
-		card_effects["heart_8"] = _effect_eight_proxy
-		card_effects["diamond_8"] = _effect_eight_proxy
+		for suit in suits:
+			# 8s currently in Manager (not fully extracted yet)
+			card_effects[suit + "_8"] = func(c): EightEffect.execute(self, c)
 
-	# Register all 2s for Double Play
+	# Register 2s
 	if GameGlobals.is_rule_active("2"):
 		for suit in suits:
-			card_effects[suit + "_2"] = _effect_play_again
+			card_effects[suit + "_2"] = func(c): TwoEffect.execute(self, c)
 			
 	# --- Update Interaction based on Jump-In Rule ---
 	# If Jump-In is enabled, players must be able to drag cards out of turn.
@@ -555,269 +569,162 @@ func _effect_default(_card: Card) -> void:
 
 # --- Effect Handlers ---
 
-# 2: Double Play (Play again)
-func _effect_play_again(_card: Card) -> void:
-	print("Effect: Double Play (2)")
-	log_message("Player %d plays again! (Any Card)" % current_player)
+
+func _show_mimic_selector(on_final_selection: Callable) -> void:
+	var popup = PanelContainer.new()
+	popup.name = "MimicSelector"
 	
-	# Enable Free Play for the follow-up card
-	discard_pile.free_play_active = true
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.95)
+	popup.add_theme_stylebox_override("panel", style)
 	
-	# Update HUD (Maybe add an icon for "Free Play" later)
-	_update_hud_effects()
+	var margin = MarginContainer.new()
+	for k in ["top", "bottom", "left", "right"]: margin.add_theme_constant_override("margin_" + k, 10)
+	popup.add_child(margin)
 	
-	# Do NOT cycle turn.
-	# Visual feedback
-	if hud_layer:
-		var bubble = speech_bubble_scene.instantiate()
-		hud_layer.add_child(bubble)
-		var current_hand = hands_array[current_player - 1]
-		bubble.global_position = current_hand.get_global_transform_with_canvas().origin + Vector2(0, -100)
-		bubble.show_message("I play again!", 1.5)
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 15)
+	margin.add_child(vbox)
 	
-	# TODO: Check if player has NO cards left (win) or NO valid cards (draw).
-	# Win check happens elsewhere usually check_win_condition().
+	# Title
+	var label = Label.new()
+	label.text = "MIMICRY: Choose Suit & Rank"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(label)
+	
+	# State
+	var selection = {"suit": "", "rank": ""}
+	var suit_buttons = {}
+	var rank_buttons = {}
+	
+	# --- 3. Confirm Button (Created early for closure access) ---
+	var confirm_btn = Button.new()
+	confirm_btn.text = "Select Suit & Rank..."
+	confirm_btn.disabled = true
+	confirm_btn.custom_minimum_size = Vector2(0, 50)
+	confirm_btn.add_theme_font_size_override("font_size", 20)
+	
+	# Helper to update UI state
+	var update_ui = func():
+		# Highlights
+		for s in suit_buttons:
+			suit_buttons[s].modulate = Color(1, 1, 0) if s == selection.suit else Color(1, 1, 1)
+		for r in rank_buttons:
+			rank_buttons[r].modulate = Color(1, 1, 0) if r == selection.rank else Color(1, 1, 1)
+			
+		# Confirm Button
+		if selection.suit != "" and selection.rank != "":
+			confirm_btn.disabled = false
+			confirm_btn.text = "MIMIC %s %s" % [selection.suit.capitalize(), selection.rank]
+		else:
+			confirm_btn.disabled = true
+			confirm_btn.text = "Select Suit & Rank..."
+
+	# --- 1. Suit Selection ---
+	var suit_container = HBoxContainer.new()
+	suit_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	suit_container.add_theme_constant_override("separation", 10)
+	vbox.add_child(suit_container)
+	
+	var suits = ["spade", "heart", "club", "diamond"]
+	for s in suits:
+		var btn = Button.new()
+		btn.text = s.capitalize()
+		btn.custom_minimum_size = Vector2(70, 40)
+		btn.pressed.connect(func():
+			selection.suit = s
+			update_ui.call()
+		)
+		suit_container.add_child(btn)
+		suit_buttons[s] = btn
+		
+	# --- 2. Rank Selection ---
+	var grid = GridContainer.new()
+	grid.columns = 7
+	grid.add_theme_constant_override("h_separation", 5)
+	grid.add_theme_constant_override("v_separation", 5)
+	vbox.add_child(grid)
+	
+	# Ranks (No 2)
+	var ranks = ["A", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "Joker"]
+	for r in ranks:
+		var btn = Button.new()
+		btn.text = r
+		btn.custom_minimum_size = Vector2(40, 40)
+		btn.pressed.connect(func():
+			selection.rank = r
+			update_ui.call()
+		)
+		grid.add_child(btn)
+		rank_buttons[r] = btn
+		
+	# Add Confirm Button at the end
+	confirm_btn.pressed.connect(func():
+		popup.queue_free()
+		on_final_selection.call(selection.rank, selection.suit)
+	)
+	vbox.add_child(confirm_btn)
+		
+	hud_layer.add_child(popup)
+	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
+
 	# If he has no valid cards, he must draw. Logic to be enforced by player interaction.
 
-# Ace: Skip next player
-func _effect_skip(_card: Card) -> void:
-	print("Effect: Skip (Ace)")
-	log_message("Effect: Skip Next Player!")
-	cycle_turn(2)
+	# Ace (Handled by Modular Effect)
+	# Functions removed.
+
+func _show_blind_hand_selector(target_idx: int, on_selected: Callable) -> void:
+	var target_hand = hands_array[target_idx - 1]
+	var cards = target_hand._held_cards
+	
+	if cards.is_empty():
+		log_message("Target has no cards!")
+		cycle_turn(1)
+		return
+		
+	var popup = PanelContainer.new()
+	popup.name = "HandSelector"
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.95)
+	popup.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	for k in ["top", "bottom", "left", "right"]: margin.add_theme_constant_override("margin_" + k, 20)
+	popup.add_child(margin)
+	
+	var grid = GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	margin.add_child(grid)
+	
+	for c in cards:
+		var btn = Button.new()
+		btn.text = "?"
+		btn.custom_minimum_size = Vector2(50, 70)
+		btn.pressed.connect(func():
+			popup.queue_free()
+			on_selected.call(c)
+		)
+		grid.add_child(btn)
+		
+	hud_layer.add_child(popup)
+	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 # 7: Next player draws 2 and is skipped
 # K: The Silence (King)
-func _effect_king(_card: Card) -> void:
-	print("Effect: King (Silence)")
-	
-	if active_effects["silence"]:
-		log_message("The King speaks! Silence is broken.")
-		active_effects["silence"] = false
-		_update_hud_effects()
-		if hud_layer:
-			var bubble = speech_bubble_scene.instantiate()
-			hud_layer.add_child(bubble)
-			bubble.global_position = hands_array[current_player - 1].get_global_transform_with_canvas().origin + Vector2(0, -100)
-			bubble.show_message("Speak freely!", 2.0)
-	else:
-		log_message("The King commands SILENCE!")
-		active_effects["silence"] = true
-		_update_hud_effects()
-		if hud_layer:
-			var bubble = speech_bubble_scene.instantiate()
-			hud_layer.add_child(bubble)
-			bubble.global_position = hands_array[current_player - 1].get_global_transform_with_canvas().origin + Vector2(0, -100)
-			bubble.show_message("Silence!", 2.0)
-			
-	cycle_turn(1)
 
-func _on_card_drag_started(card: Card) -> void:
-	if not active_effects["silence"]:
-		return
-		
-	# Verify if move is valid
-	var can_play = discard_pile._card_can_be_added([card])
-	
-	if not can_play:
-		print("SILENCE BROKEN! Invalid drag attempt.")
-		log_message("Silence Broken! Penalty: 2 Cards.")
-		
-		# Cancel Drag and Snap Back
-		card.change_state(Card.DraggableState.IDLE)
-		card.position = card.original_position
-		card.rotation = card.original_hover_rotation
-		card.scale = card.original_scale
-		
-		# Apply Penalty
-		# Target is the owner of the card.
-		# card.card_container should be the Hand.
-		var owner_hand = card.card_container
-		if owner_hand is Hand:
-			distribute_cards(owner_hand, 2)
-		else:
-			# Fallback if weird parenting
-			distribute_cards(hands_array[current_player - 1], 2)
-
-# 7: Next player draws 2 (Stackable)
-func _effect_draw_2_skip(_card: Card) -> void:
-	_print_game_event("Effect Triggered", "Stacking 7 (+2)")
-	log_message("Effect: +2 Cards! Stack or Draw!")
-	
-	pending_penalty += 2
-	penalty_type = "7"
-	
-	# Sync failure to pile
-	discard_pile.pending_penalty = pending_penalty
-	discard_pile.penalty_type = penalty_type
-	
-	# Do NOT draw immediate. Do NOT skip immediate.
-	# Pass control to next player to respond.
-	cycle_turn(1, true)
 
 # 9: Last player who played draws 1
 # 9: Last player who played draws 1 (Stacking allowed via History)
-func _effect_draw_last_player(_card: Card) -> void:
-	print("Effect: Last Player Draws (9)")
-	
-	if play_history.size() < 2:
-		print("History too short to apply Rule 9.")
-		cycle_turn(1)
-		return
 
-	# 1. Calculate Stacking Streak
-	# Count how many contiguous 9s are at the end of history
-	var streak = 0
-	for i in range(play_history.size() - 1, -1, -1):
-		var hist_card_name = play_history[i].card_name
-		if "9" in hist_card_name: # Simple check for rank 9
-			streak += 1
-		else:
-			break
-			
-	var amount_to_draw = streak
-	
-	# 2. Identify Target
-	# The target is likely the player of the PREVIOUS card in history.
-	# Example: [P1:5, P2:9 (Current)]. Target P1. Amount 1.
-	# Example: [P1:5, P2:9, P4:9 (Current)]. Target P2. Amount 2.
-	
-	# EXCEPTION: Self-Doubling (P2 plays 9, then P2 jumps in with 9)
-	# Logic: [P1:5, P2:9, P2:9]. 
-	# Default logic would target P2 (index -2). This is self-punishment.
-	# User Rule: In this case, target P1 (index -3).
-	
-	var target_index_in_history = play_history.size() - 2
-	
-	if play_history.size() >= 2:
-		var last_player_idx = play_history[play_history.size() - 1].player
-		var prev_player_idx = play_history[play_history.size() - 2].player
-		
-		# Check for Self-Double (Same player played last 2 cards)
-		if last_player_idx == prev_player_idx and "9" in play_history[play_history.size() - 1].card_name:
-			# Self-Double Detected involving current card
-			target_index_in_history = play_history.size() - 3
-			print("DEBUG: Self-Doubling 9 detected! Redirecting target to history[-3].")
 
-	if target_index_in_history < 0:
-		print("History too short for Rule 9 target calculation (Start of Game?).")
-		cycle_turn(1)
-		return
-
-	var target_entry = play_history[target_index_in_history]
-	var target_player_idx = target_entry.player
-	
-	log_message("Effect: Player %d draws %d card(s)! (Rule 9)" % [target_player_idx, amount_to_draw])
-	
-	var target_hand = hands_array[target_player_idx - 1]
-	distribute_cards(target_hand, amount_to_draw)
-	
-	cycle_turn(1)
-
-# 6: Rule 666 (Mark of the Beast)
-func _effect_six(_card: Card) -> void:
-	print("Effect: Check 666")
-	
-	var beast_summoned = false
-	var authors = {}
-	if play_history.size() >= 3:
-		# Check last 3 cards
-		var h1 = play_history[play_history.size() - 1]
-		var h2 = play_history[play_history.size() - 2]
-		var h3 = play_history[play_history.size() - 3]
-		
-		var c1 = h1.card_name
-		var c2 = h2.card_name
-		var c3 = h3.card_name
-		
-		if "6" in c1 and "6" in c2 and "6" in c3:
-			beast_summoned = true
-			authors[h1.player] = true
-			authors[h2.player] = true
-			authors[h3.player] = true
-			
-	if beast_summoned:
-		_print_game_event("Effect Triggered", "666 COMPLETED!")
-		
-		# --- Phase 2: The Demon is Summoned (Game Over) ---
-		if devil_awakened:
-			log_message("!!! 666 - THE DEMON IS SUMMONED !!!")
-			log_message("!!! GAME OVER - THE DEMON WINS !!!")
-			#if Alert: Alert.text = "GAME OVER: DEMON WINS"
-			# Stop game state/input?
-			# For now, just a major log event.
-			return
-			
-		# --- Phase 1: The Devil Awakens ---
-		log_message("!!! 666 - THE DEVIL AWAKENS !!!")
-		devil_awakened = true
-		
-		# 1. Remove Top 3 Cards (The 6s) from the game
-		discard_pile.remove_top_cards(3)
-		log_message("The 3 Sixes are consumed by the void...")
-		
-		# 2. Identify Victims
-		var victims = []
-		for p_idx in range(1, num_players + 1):
-			if not authors.has(p_idx):
-				victims.append(hands_array[p_idx - 1])
-
-		# Fallback: Everyone suffers if all participated
-		if victims.is_empty():
-			log_message("All are sinners! The spoils effectively vanish (or go to everyone).")
-			# User said: "Distributes to Victims". If no victims, logic implies fallback or nothing.
-			# Let's fallback to everyone to keep game moving / punishment real.
-			victims = hands_array.duplicate()
-			
-		# 3. Distribute Remaining Pile
-		var penalty_pool = discard_pile.collect_all_cards()
-		
-		if penalty_pool.is_empty():
-			log_message("The void was hungry... no other cards to distribute.")
-		else:
-			penalty_pool.shuffle()
-			log_message("The Beast distributes %d remaining cards!" % penalty_pool.size())
-			
-			var v_idx = 0
-			for card in penalty_pool:
-				var victim_hand = victims[v_idx % victims.size()]
-				victim_hand.move_cards([card])
-				v_idx += 1
-				
-		cycle_turn(1) 
-		# Pile is now empty. Next player plays on empty pile (Any card valid).
-	else:
-		# Normal 6
-		log_message("Player %d played a 6..." % current_player)
-		cycle_turn(1)
-
-# Q: Queen Proxy (Dispatches based on Mode)
-func _effect_queen_proxy(card: Card) -> void:
-	var mode = _get_effective_mode(current_player)
-	if mode == MODE_WANWAN:
-		_effect_queen_wanwan(card)
-	else:
-		_effect_queen_maumau(card)
-
-# Q (Maumau): Reverse direction
-func _effect_queen_maumau(_card: Card) -> void:
-	print("Effect: Reverse (Q) [MAU MAU]")
-	log_message("Effect: Direction Reversed!")
-	play_direction *= -1
-	_update_hud_effects()
-	cycle_turn(1)
-	
-# Q (Wan Wan): Target Player -> Die Roll -> Mode Switch
-func _effect_queen_wanwan(_card: Card) -> void:
-	print("Effect: Queen (Q) [WAN WAN]")
-	log_message("Wan Wan Queen! Choose a victim to roll!")
-	
-	# Block input
-	discard_pile.input_disabled = true
-	
-	# Show Player Selector
-	_show_player_selector()
-
-func _show_player_selector() -> void:
+func _show_player_selector(picker_idx: int, on_selected: Callable, excluded_idx: int = -1) -> void:
 	# Quick Procedural UI
 	var popup = PanelContainer.new()
 	popup.name = "PlayerSelector"
@@ -845,7 +752,7 @@ func _show_player_selector() -> void:
 	margin.add_child(vbox)
 	
 	var label = Label.new()
-	label.text = "CHOOSE A VICTIM"
+	label.text = "PLAYER %d, CHOOSE A VICTIM" % picker_idx
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 24)
 	vbox.add_child(label)
@@ -857,287 +764,59 @@ func _show_player_selector() -> void:
 	vbox.add_child(grid)
 	
 	for i in range(1, num_players + 1):
-		# Don't target self? User didn't specify. Assuming allow all.
-		# Note: "He targets one player". Usually can target self.
+		# Exclusion check
+		if i == excluded_idx:
+			continue
+			
 		var btn = Button.new()
 		btn.text = "Player %d" % i
 		btn.custom_minimum_size = Vector2(100, 60) # Bigger buttons
-		btn.pressed.connect(func(): _on_player_selected(i, popup))
+		btn.pressed.connect(func(): 
+			popup.queue_free()
+			on_selected.call(i)
+		)
 		grid.add_child(btn)
 		
 	hud_layer.add_child(popup)
 	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
-	# Force layout update?
-	# popup.offset_top = 0 ... preset should handle it.
 	
-func _on_player_selected(target_idx: int, popup: Control) -> void:
-	popup.queue_free()
-	log_message("Player %d selected Player %d!" % [current_player, target_idx])
-	
-	# Roll Die for Target
-	var val = randi() % 6 + 1
-	show_dice_roll(target_idx, val)
-	
-	# Apply Mode Change
-	if val % 2 == 0:
-		_set_player_mode(target_idx, MODE_MAUMAU)
-	else:
-		_set_player_mode(target_idx, MODE_WANWAN)
-		
-	# Wait for roll? User said "whatever" for now.
-	# But we need to resume turn.
-	await get_tree().create_timer(3.0).timeout
-	
-	discard_pile.input_disabled = false
-	cycle_turn(1)
-func _effect_jack(_card: Card) -> void:
-	_print_game_event("Effect Triggered", "Jack/Joker Suit Selection")
-	log_message("Player %d is choosing a suit..." % current_player)
-	
-	# Block input to prevent other players from playing prematurely
-	discard_pile.input_disabled = true
-	
-	# Do NOT cycle turn yet. Wait for selection.
-	
-	var selector = suit_selector_scene.instantiate()
-	# Add to HUD (CanvasLayer)
-	if hud_layer:
-		hud_layer.add_child(selector)
-	else:
-		print("ERROR: HUD Layer missing!")
-		# Unblock if error
-		discard_pile.input_disabled = false
+	# 5s (Handled by Modular Effect)
+
+# Joker: Draw 4 + Skip + Choose Suit (Stacking)
+# Joker: Draw 4 + Skip + Choose Suit (Stacking)
+# Joker: Draw 4 + Skip + Choose Suit (Stacking)
+
+
+func _on_card_drag_started(card: Card) -> void:
+	if not active_effects["silence"]:
 		return
-	
-	selector.suit_selected.connect(_on_suit_selected)
-
-func _on_suit_selected(suit: String) -> void:
-	_print_game_event("Selection", "Chose Suit: " + suit)
-	log_message("Player %d chose %s!" % [current_player, suit.capitalize()])
-	
-	# 1. Update Discard Pile Active Suit
-	discard_pile.active_suit = suit
-	
-	_update_hud_effects()
-	
-	# 2. Show Speech Bubble
-	var bubble = speech_bubble_scene.instantiate()
-	# add_child(bubble) # REMOVED: Don't add to manager directly
-	# Let's put it in HUD but mapped to hand position, or just add to Hand node?
-	# Adding to Hand node is easiest if Hand is a Control/Node2D.
-	
-	var current_hand = hands_array[current_player - 1]
-	# current_hand is a Node2D (CardContainer). 
-	# bubble is a Control. 
-	# We can add bubble to the HUD and position it at the hand's screen position.
-	if hud_layer:
-		hud_layer.add_child(bubble)
-		bubble.global_position = current_hand.get_global_transform_with_canvas().origin
 		
-		# Offset slightly
-		bubble.global_position += Vector2(0, -100) # Above hand
+	# Verify if move is valid
+	var can_play = discard_pile._card_can_be_added([card])
+	
+	if not can_play:
+		print("SILENCE BROKEN! Invalid drag attempt.")
+		log_message("Silence Broken! Penalty: 2 Cards.")
 		
-		bubble.show_message("I choose " + suit.capitalize() + "!", 2.0)
-	
-	# 3. Wait 2 seconds then cycle turn
-	await get_tree().create_timer(2.0).timeout
-	
-	# Cycle turn by pending amount (1 for Jack, 2 for Joker)
-	cycle_turn(pending_turn_skip)
-	# Reset back to default
-	pending_turn_skip = 1
-	
-	# Unblock input
-	discard_pile.input_disabled = false
-
-# 5 Diamond: Rotate hands Right (1 step)
-func _effect_rotate_right_1(_card: Card) -> void:
-	print("Effect: Rotate Hands Right (5D)")
-	_rotate_hands_content(1)
-	cycle_turn(1)
-
-# 5 Heart: Rotate hands Left (2 steps)
-func _effect_rotate_left_2(_card: Card) -> void:
-	print("Effect: Rotate Hands Left 2 (5H)")
-	_rotate_hands_content(-2) # Negative for left/counter-clockwise relative to array
-	cycle_turn(1)
-
-# Joker: Draw 4 + Skip + Choose Suit (Stacking)
-# Joker: Draw 4 + Skip + Choose Suit (Stacking)
-func _effect_joker(_card: Card) -> void:
-	_print_game_event("Effect Triggered", "Stacking Joker (+4)")
-	log_message("Joker! +4 Cards! Stack or Draw!")
-	
-	pending_penalty += 4
-	penalty_type = "joker"
-	
-	# Sync failure to pile
-	discard_pile.pending_penalty = pending_penalty
-	discard_pile.penalty_type = penalty_type
-	
-	# Pass control to Jack effect for Suit Selection, which then cycles turn.
-	# Note: Joker skips 1 person, so generally next player is skipped.
-	# But Jack effect sets pending_turn_skip = 1 (default).
-	# Joker should set pending_turn_skip = 2 (Skip).
-	pending_turn_skip = 2
-	
-	_effect_jack(_card)
-
-# 10: Simon Says (Word Memory)
-func _effect_ten(_card: Card) -> void:
-	print("Effect: Simon Says (10)")
-	
-	# Block interaction
-	_set_hands_interaction(false) 
-	
-	# Challenge Phase
-	if not word_chain.is_empty():
-		log_message("Simon Says: Recite the chain!")
-		for i in range(word_chain.size()):
-			var correct = word_chain[i]
-			var options = _generate_simon_options(correct)
-			
-			log_message("Challenge %d/%d..." % [i + 1, word_chain.size()])
-			simon_popup.start_challenge(correct, options)
-			
-			var success = await simon_popup.challenge_completed
-			if not success:
-				log_message("WRONG! The chain breaks!")
-				var penalty = word_chain.size() + 1
-				var victim_hand = hands_array[current_player - 1]
-				distribute_cards(victim_hand, penalty)
-				word_chain.clear()
-				_finish_simon_turn(false)
-				return # Exit immediately on failure
-	
-	# Input Phase (If success or empty)
-	log_message("Simon Says: Add a new word!")
-	simon_popup.start_input_mode()
-	var new_word = await simon_popup.word_submitted
-	log_message("Player wrote: " + new_word)
-	word_chain.append(new_word)
-	_finish_simon_turn(true)
-
-func _finish_simon_turn(success: bool) -> void:
-	# Restore interaction
-	_set_hands_interaction(true)
-	cycle_turn(1)
-
-func _generate_simon_options(correct: String) -> Array[String]:
-	var opts: Array[String] = [correct]
-	var pool = dict_pt if simon_dict_mode == "PT" else dict_en
-	pool.shuffle()
-	
-	for w in pool:
-		if w != correct and opts.size() < 4:
-			opts.append(w)
-			
-	opts.shuffle()
-	return opts
-
-func _set_hands_interaction(enabled: bool) -> void:
-	for hand in hands_array:
-		hand.allow_remote_interaction = enabled
-
-# Club 4: Clears Active Effects (8s, Kings, Queens/Direction)
-# DOES NOT clear Spade 4 Lock.
-# DOES NOT clear Jack/Joker Active Suit.
-func _effect_club_4(_card: Card) -> void:
-	print("Effect: Clear Active Effects (Club 4)")
-	log_message("Effects Cleared (8s, Direction)")
-	
-	# Clear 8s Masquerade
-	active_effects["eight_black"] = false
-	active_effects["eight_red"] = false
-	discard_pile.active_effect_eight_red = false
-	active_effects["silence"] = false
-	
-	# Note: Club 4 does NOT clear Spade 4 Lock (active_effects["locked"])
-	# So we don't reset discard_pile.active_effect_locked here unless rule changes.
-	
-	# Clear Direction (Queen Effect) - Reset to Clockwise
-	play_direction = 1
-	
-	# Clear Silence (King Effect - Future)
-	# active_effects["silenced"] = false
-	
-	_update_hud_effects()
-	cycle_turn(1)
-
-# Spade 4: Locks Effects (Only Red 4s can unlock)
-func _effect_spade_4(_card: Card) -> void:
-	print("Effect: LOCK Effects (Spade 4)")
-	log_message("Effects are now LOCKED!")
-	active_effects["locked"] = true
-	discard_pile.active_effect_locked = true # Sync to pile
-	_update_hud_effects()
-	cycle_turn(1)
-
-# Red 4: Unlocks Effects
-func _effect_red_4(_card: Card) -> void:
-	print("Effect: UNLOCK Effects (Red 4)")
-	if active_effects["locked"]:
-		log_message("Effects are now UNLOCKED!")
-		active_effects["locked"] = false
-		discard_pile.active_effect_locked = false # Sync to pile
-	else:
-		log_message("Red 4 played (Nothing locked).")
-	_update_hud_effects()
-	cycle_turn(1)
-	
-# 8 (Proxy)
-func _effect_eight_proxy(card: Card) -> void:
-	var mode = _get_effective_mode(current_player)
-	
-	if mode == MODE_WANWAN:
-		_effect_eight_wanwan(card)
-	else:
-		# Mau Mau: Black vs Red
-		# Check suit
-		if card.card_name.contains("club") or card.card_name.contains("spade"):
-			_effect_eight_maumau_black(card)
+		# Cancel Drag and Snap Back
+		card.change_state(Card.DraggableState.IDLE)
+		card.position = card.original_position
+		card.rotation = card.original_hover_rotation
+		card.scale = card.original_scale
+		
+		# Apply Penalty
+		# Target is the owner of the card.
+		# card.card_container should be the Hand.
+		var owner_hand = card.card_container
+		if owner_hand is Hand:
+			distribute_cards(owner_hand, 2)
 		else:
-			_effect_eight_maumau_red(card)
+			# Fallback if weird parenting
+			distribute_cards(hands_array[current_player - 1], 2)
+	
 
-# 8 (Wan Wan): Free Turn + Swap Next Mode
-func _effect_eight_wanwan(_card: Card) -> void:
-	print("Effect: 8 (Wan Wan)")
-	log_message("Wan Wan 8! Play again, next effect is SWAPPED!")
-	
-	active_effects["swap_next_mode"] = true
-	discard_pile.free_play_active = true
-	_update_hud_effects()
-	
-	# Do NOT cycle turn
-	# Visual feedback
-	if hud_layer:
-		var bubble = speech_bubble_scene.instantiate()
-		hud_layer.add_child(bubble)
-		bubble.show_message("Paradigm Shift!", 1.5)
-
-# 8 Black (Mau Mau): Toggle Black Masquerade
-func _effect_eight_maumau_black(_card: Card) -> void:
-	print("Effect: 8 Black (Masquerade) [MAU MAU]")
-	log_message("Black 8! Black cards swap suits!")
-	
-	active_effects["eight_black"] = true
-	discard_pile.active_effect_eight_black = true
-	
-	_update_hud_effects()
-	cycle_turn(1)
-
-# 8 Red (Mau Mau): Toggle Red Masquerade
-func _effect_eight_maumau_red(_card: Card) -> void:
-	print("Effect: 8 Red (Masquerade) [MAU MAU]")
-	log_message("Red 8! Red cards swap suits!")
-	
-	active_effects["eight_red"] = true
-	discard_pile.active_effect_eight_red = true
-	
-	_update_hud_effects()
-	cycle_turn(1)
 
 # Helper for rotation
 func _rotate_hands_content(steps: int) -> void:
@@ -1611,13 +1290,25 @@ func _update_player_mode_ui(p_idx: int) -> void:
 	
 	var label = player_labels[p_idx - 1]
 	var mode = player_modes.get(p_idx, MODE_MAUMAU)
+	var items = player_items.get(p_idx, [])
 	
+	var text = "Player %d" % p_idx
 	if mode == MODE_MAUMAU:
 		label.modulate = Color.WHITE
-		label.text = "Player %d (MAU)" % p_idx
+		text += " (MAU)"
 	else:
-		label.modulate = Color(1.0, 0.2, 0.2) # Red
-		label.text = "Player %d (WAN)" % p_idx
+		label.modulate = Color(1.0, 0.2, 0.2)
+		text += " (WAN)"
+		
+	# Show Items
+	if "mirror_force" in items:
+		text += " 🛡️"
+		# Optional: Show count if > 1?
+		var count = items.count("mirror_force")
+		if count > 1:
+			text += "x%d" % count
+			
+	label.text = text
 
 func show_dice_roll(player_idx: int, value: int) -> void:
 	if not die_scene: return
@@ -1662,3 +1353,98 @@ func show_dice_roll(player_idx: int, value: int) -> void:
 	get_tree().create_timer(4.0).timeout.connect(func(): 
 		if is_instance_valid(die): die.queue_free()
 	)
+
+# --- Item System / Targeting ---
+
+func apply_targeted_effect(target_idx: int, source_idx: int, effect_callback: Callable) -> void:
+	# Check if target has Mirror Force
+	var items = player_items.get(target_idx, [])
+	
+	if "mirror_force" in items:
+		log_message("Player %d has a Mirror Force! Asking to use..." % target_idx)
+		_show_reflection_popup(target_idx, source_idx, effect_callback)
+	else:
+		# No items, apply directly
+		effect_callback.call(target_idx)
+
+func _show_reflection_popup(target_idx: int, source_idx: int, callback: Callable) -> void:
+	# Block Input
+	if discard_pile: discard_pile.input_disabled = true
+	
+	var popup = PanelContainer.new()
+	popup.name = "MirrorForcePopup"
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.0, 0.0, 0.2, 0.95)
+	style.border_width_left = 3
+	style.border_width_right = 3
+	style.border_width_top = 3
+	style.border_width_bottom = 3
+	style.border_color = Color.CYAN
+	style.corner_radius_top_left = 15
+	style.corner_radius_top_right = 15
+	style.corner_radius_bottom_left = 15
+	style.corner_radius_bottom_right = 15
+	popup.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	popup.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 20)
+	margin.add_child(vbox)
+	
+	var label = Label.new()
+	label.text = "PLAYER %d!\nUSE MIRROR FORCE?" % target_idx
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 20)
+	vbox.add_child(label)
+	
+	var hbox = HBoxContainer.new()
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.add_theme_constant_override("separation", 30)
+	vbox.add_child(hbox)
+	
+	# YES Button
+	var btn_yes = Button.new()
+	btn_yes.text = "REFLECT"
+	btn_yes.custom_minimum_size = Vector2(100, 50)
+	btn_yes.modulate = Color(0.5, 1.0, 0.5) # Greenish
+	btn_yes.pressed.connect(func(): _on_reflection_decision(target_idx, source_idx, callback, true, popup))
+	hbox.add_child(btn_yes)
+	
+	# NO Button
+	var btn_no = Button.new()
+	btn_no.text = "NO"
+	btn_no.custom_minimum_size = Vector2(100, 50)
+	btn_no.modulate = Color(1.0, 0.5, 0.5) # Reddish
+	btn_no.pressed.connect(func(): _on_reflection_decision(target_idx, source_idx, callback, false, popup))
+	hbox.add_child(btn_no)
+	
+	hud_layer.add_child(popup)
+	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	
+func _on_reflection_decision(target_idx: int, source_idx: int, callback: Callable, used_mirror: bool, popup: Control) -> void:
+	popup.queue_free()
+	if discard_pile: discard_pile.input_disabled = false
+	
+	if used_mirror:
+		log_message("Player %d USED Mirror Force! Effect Reflected!" % target_idx)
+		
+		# Remove Item
+		var items = player_items.get(target_idx, [])
+		if "mirror_force" in items:
+			items.erase("mirror_force") # Removes first occurrence
+			player_items[target_idx] = items
+			_update_player_mode_ui(target_idx)
+			
+		# Callback with SOURCE as target
+		callback.call(source_idx)
+	else:
+		log_message("Player %d held the Mirror Force." % target_idx)
+		# Callback with ORIGINAL TARGET
+		callback.call(target_idx)

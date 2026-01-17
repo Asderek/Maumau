@@ -20,24 +20,84 @@ func run_debug_scenarios(manager: Node) -> void:
 	
 	# _scenario_666(manager)
 	
-	_scenario_wanwan_8_test(manager)
+	# _scenario_wanwan_8_test(manager)
+	
+	# _scenario_ace_steal_test(manager)
+	# _scenario_diamond_flush(manager)
+	pass
+
+func _scenario_ace_steal_test(manager: Node) -> void:
+	# Set Hand Size to 3
+	manager.num_cards_in_hand = 3
+	print("DEBUG: Set Hand Size to 3")
+	
+	# Discard: Something neutral for P1 to play on (e.g. Diamond 5)
+	_move_card_to_discard(manager, "diamond_5")
+	
+	# P1: Diamond A, 2, 3
+	var p1_cards = ["diamond_A", "diamond_2", "diamond_3"]
+	for c in p1_cards: _move_card_to_hand(manager, 0, c)
+	
+	# P2: Heart 2, 3, 4
+	var p2_cards = ["heart_2", "heart_3", "heart_4"]
+	for c in p2_cards: _move_card_to_hand(manager, 1, c)
+
+	# P4 (Index 3): Diamond K, Heart K, Club K
+	if manager.num_players >= 4:
+		var p4_cards = ["diamond_K", "heart_K", "club_K"]
+		for c in p4_cards: _move_card_to_hand(manager, 3, c)
+	else:
+		print("DEBUG: Not enough players for P4 setup. Skipping P4.")
+		
+	# P1 Starts
+	_set_starting_player(manager, 0)
+	
+	if manager.has_method("_set_player_mode"):
+		manager._set_player_mode(1, "WAN_WAN")
+		print("DEBUG: Forced P1 to WAN_WAN")
+
+func _scenario_diamond_flush(manager: Node) -> void:
+	# Discard: Diamond 3
+	_move_card_to_discard(manager, "diamond_3")
+	
+	# P1 Hand: All Diamonds (A to K + Joker)
+	var ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+	
+	for r in ranks:
+		_move_card_to_hand(manager, 0, "diamond_" + r)
+		
+	# Add Red Joker (fits Diamond theme)
+	_move_card_to_hand(manager, 0, "joker_red")
+	
+	# Add Red Joker (fits Diamond theme)
+	_move_card_to_hand(manager, 2, "diamond_8")
+	# Add Red Joker (fits Diamond theme)
+	_move_card_to_hand(manager, 1, "heart_8")
+	
+	# Set P1 to Start
+	_set_starting_player(manager, 0)
 	
 func _scenario_wanwan_8_test(manager: Node) -> void:
 	# Discard: Club 3
-	_move_card_to_discard(manager, "club_3")
-	
-	# P1 Hand: Club 8, Any 2, Any Q, Any J, Any 8
-	var hand_cards = ["club_8", "diamond_2", "heart_Q", "spade_J", "heart_8"]
+	# P1 Hand: Ace (Wan Wan Trigger)
+	var hand_cards = ["spade_A"]
 	for c_name in hand_cards:
 		_move_card_to_hand(manager, 0, c_name)
+		
+	_move_card_to_discard(manager, "spade_3")
 		
 	# Set P1 to Start
 	_set_starting_player(manager, 0)
 	
 	# Force Wan Wan Mode for P1
 	if manager.has_method("_set_player_mode"):
-		manager._set_player_mode(1, "WAN_WAN") # Use String literal or manager.MODE_WANWAN if accessible
+		manager._set_player_mode(1, "WAN_WAN")
 		print("DEBUG: Forced P1 to WAN_WAN mode")
+	
+	_move_card_to_hand(manager, 0, "black")
+	_move_card_to_hand(manager, 1, "joker_red")
+	_move_card_to_hand(manager, 2, "joker_red")
+	_move_card_to_hand(manager, 3, "joker_black")
 
 
 # --- Scenario Definitions ---

@@ -27,7 +27,13 @@ func add_card(card: Card, index: int = -1) -> void:
 	var manager = card_manager.get_parent()
 	if manager and card.card_container:
 		if manager.hands_array:
-			var hand_idx = manager.hands_array.find(card.card_container)
+			# Fix: Manual search to avoid TypedArray error
+			var hand_idx = -1
+			for i in range(manager.hands_array.size()):
+				if manager.hands_array[i] == card.card_container:
+					hand_idx = i
+					break
+					
 			if hand_idx != -1:
 				player_index = hand_idx + 1 # 1-based index
 	
@@ -62,7 +68,11 @@ func _card_can_be_added(_cards: Array) -> bool:
 	if manager and card.card_container:
 		var hand_index = -1
 		if manager.hands_array:
-			hand_index = manager.hands_array.find(card.card_container)
+			# Fix: Manual search to avoid TypedArray error if card_container type doesn't strictly match Hand
+			for i in range(manager.hands_array.size()):
+				if manager.hands_array[i] == card.card_container:
+					hand_index = i
+					break
 			
 		if hand_index != -1:
 			var player_id = hand_index + 1
@@ -87,17 +97,29 @@ func _card_can_be_added(_cards: Array) -> bool:
 	if top.is_empty():
 		return true;
 		
+	var player_mode = manager._get_effective_mode(manager.current_player)
+	
+	# Wan Wan 2: Universal Wildcard (Has all values/suits)
+	if candidate_value == "2" and player_mode == manager.MODE_WANWAN:
+		if Alert: Alert.text = "Wan Wan 2! Mimicry allowed."
+		return true
+		
 	# 2. Active Penalty Check (Stacking 7s or Jokers)
 	# This MUST come before Wildcards/FreePlay/etc.
 	if pending_penalty > 0:
 		# If there is a penalty stack, player MUST play a matching card (Stacking)
 		# e.g. If source is "7", must play "7". If "joker", must play "joker".
 		
+		# Stacking Validation: Only allowed if player is in MAU MAU mode.
+		# Wan Wan cards (7/Joker) are "different" and cannot stack on Mau Mau penalties.
+		# Note: Wan Wan 2 (handled above) bypasses this and CAN stack via specific effect logic.
+		var is_maumau = (player_mode == manager.MODE_MAUMAU)
+		
 		var type_match = false
 		if penalty_type == "7" and candidate_value == "7":
-			type_match = true
+			if is_maumau: type_match = true
 		elif penalty_type == "joker" and candidate_value == "joker":
-			type_match = true
+			if is_maumau: type_match = true
 			
 		if not type_match:
 			if Alert: Alert.text = "Penalidade Ativa! Jogue " + penalty_type + " ou compre cartas."
