@@ -271,19 +271,24 @@ func hold_card(card: Card) -> void:
 	super.hold_card(card)
 
 var is_active_hand: bool = false
+var _visual_highlight_enabled: bool = false
 
-func set_highlight(active: bool) -> void:
+func set_active(active: bool) -> void:
 	is_active_hand = active
+	# Update interaction status immediately when turn changes
 	for card in _held_cards:
-		card.set_active_player_display(active)
-		# Update interaction status immediately when turn changes
 		card.can_be_interacted_with = is_active_hand or allow_remote_interaction
+
+func set_highlight(show: bool) -> void:
+	_visual_highlight_enabled = show
+	for card in _held_cards:
+		card.set_active_player_display(show)
 
 func update_card_ui() -> void:
 	super.update_card_ui()
 	# Ensure highlight persistence on potential reorders/adds
 	for card in _held_cards:
-		card.set_active_player_display(is_active_hand)
+		card.set_active_player_display(_visual_highlight_enabled)
 
 ## Override to ensure highlight is cleared when card leaves the hand
 func remove_card(card: Card) -> bool:

@@ -172,7 +172,11 @@ func _pre_process_exported_variables() -> bool:
 func on_card_drag_started(card: Card) -> void:
 	if not current_dragged_cards.has(card):
 		current_dragged_cards.append(card)
-		
+	
+	# Global toggle for play assist
+	if not GameGlobals.show_play_highlights:
+		return
+
 	for container in card_container_dict.values():
 		# Optional: Don't highlight the source container to avoid clutter?
 		# Or maybe we want to reorder. Let's keep it simple for now.

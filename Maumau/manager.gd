@@ -193,13 +193,88 @@ var selected_card_index = 0
 
 func _process(_delta: float) -> void:
 	# Handle highlights every frame
-	handle_highlight()
+	if GameGlobals.show_play_highlights:
+		handle_highlight()
+	else:
+		# Ensure highlights are cleared if disabled
+		# (Though a full clear might be needed if toggled during play. 
+		# For now, relying on handle_highlight clearing them if condition fails or just initial state)
+		# Improved: Force clear if we toggle it off?
+		# Let's just not run the logic. If it was active, it might stick?
+		# Proper way: If disabled, we should run a "clear all highlights" once.
+		# For simplicity: handle_highlight() manages states. If disabled, we rely on the fact they default to false?
+		# Actually, if we stop calling it, the last state persists.
+		# BETTER: Call handle_highlight but pass a flag? Or modifying handle_highlight internally?
+		# Let's modify handle_highlight to check the global itself.
+		handle_highlight() # It will check inside.
 	
 	if hands_array.size() <= 1: return
 	
 	# Cycle Turn (Space)
 	if Input.is_action_just_pressed("ui_accept"): 
 		cycle_turn(1, false)
+
+# ... (cycle_turn, etc) ...
+
+func update_turn_ui() -> void:
+	# ...
+	for i in range(hands_array.size()):
+		var hand = hands_array[i]
+		var is_current = (i == current_player - 1)
+		
+		# Logic: Enable input for current player
+		hand.set_active(is_current)
+		
+		# Visual: Highlight if enabled in options
+		if is_current and GameGlobals.show_current_player_highlight:
+			hand.set_highlight(true)
+		else:
+			hand.set_highlight(false) 
+
+
+# ...
+
+func _update_hud_effects() -> void:
+	if effect_status_bar:
+		if GameGlobals.show_effect_status_bar:
+			effect_status_bar.visible = true
+			var current_suit = ""
+			if discard_pile:
+				current_suit = discard_pile.active_suit
+			effect_status_bar.update_status(active_effects, current_suit)
+		else:
+			effect_status_bar.visible = false
+
+# ...
+
+func handle_highlight() -> void:
+	# 1. Reset helper highlight on discard pile
+	if discard_pile:
+		for card in discard_pile._held_cards:
+			card.set_helper_display(false)
+			
+	if deck:
+		for card in deck._held_cards:
+			card.set_helper_display(false)
+
+	# Check Global Highlight Setting
+	if not GameGlobals.show_play_highlights:
+		return # Exit after clearing.
+
+	# Check if any card is currently being dragged (held)
+	var dragged_cards = card_manager.current_dragged_cards
+	var is_dragging = not dragged_cards.is_empty()
+	
+	# Handle Highlight for Discard Pile
+	var discard_top_cards = discard_pile.get_top_cards(1)
+	if not discard_top_cards.is_empty():
+		var top_card = discard_top_cards[0]
+		# Only highlight if dragging
+		if is_dragging:
+			# Use logic-only check (ignores mouse position) to show valid target immediately
+			var can_accept = discard_pile._card_can_be_added(dragged_cards)
+			top_card.set_helper_display(true, can_accept)
+
 
 func cycle_turn(steps: int = 1, played_card: bool = false) -> void:
 	# Update last player ONLY if they played a card (passed turns don't count)
@@ -239,23 +314,6 @@ func distribute_cards(target_hand: Hand, count: int) -> void:
 		
 	target_hand.move_cards(cards_to_deal)
 	update_player_stats()
-
-func update_turn_ui() -> void:
-	var player_name = ""
-	match current_player:
-		1: player_name = "Down"
-		2: player_name = "Left"
-		3: player_name = "Up"
-		4: player_name = "Right"
-	
-	#player_label.text = "Current Player: " + player_name
-	
-	for i in range(hands_array.size()):
-		var hand = hands_array[i]
-		if i == current_player - 1:
-			hand.set_highlight(true)
-		else:
-			hand.set_highlight(false)
 
 func _on_deck_card_pressed(_card: Card) -> void:
 	# Check if it is current player's turn (handled by UI input block mostly, but safeguard)
@@ -334,41 +392,6 @@ func populate_deck() -> void:
 	print("Deck populated with ", deck.get_card_count(), " cards.")
 
 
-func handle_highlight() -> void:
-	# 1. Reset helper highlight on discard pile
-	if discard_pile:
-		for card in discard_pile._held_cards:
-			card.set_helper_display(false)
-			
-	# Reset helper highlight on deck if needed (though usually hidden if face down/stacked)
-	if deck:
-		for card in deck._held_cards:
-			card.set_helper_display(false)
-
-	# Check if any card is currently being dragged (held)
-	# Retrieve the actual cards from CardManager
-	var dragged_cards = card_manager.current_dragged_cards
-	var is_dragging = not dragged_cards.is_empty()
-	
-	# Handle Highlight for Discard Pile
-	var discard_top_cards = discard_pile.get_top_cards(1)
-	if not discard_top_cards.is_empty():
-		var top_card = discard_top_cards[0]
-		# Only highlight if dragging
-		if is_dragging:
-			# Use logic-only check (ignores mouse position) to show valid target immediately
-			var can_accept = discard_pile._card_can_be_added(dragged_cards)
-			top_card.set_helper_display(true, can_accept)
-		
-	# Handle Highlight for Deck (Draw Pile)
-	# var deck_top_cards = deck.get_top_cards(1)
-	# if not deck_top_cards.is_empty():
-	# 	var top_card = deck_top_cards[0]
-	# 	if is_dragging:
-	# 		# Usually you can't drop cards ONTO the deck in MauMau, so this is likely invalid (Red)
-	# 		# Force false to show "Invalid" (Red) immediately
-	# 		# top_card.set_helper_display(true, false) # REMOVED: Causing persistent Red bug if dealt immediately
-	# 		pass
 
 
 func _on_card_played(card: Card) -> void:
@@ -399,6 +422,8 @@ func _on_card_played(card: Card) -> void:
 var card_effects: Dictionary = {}
 
 func _register_card_effects() -> void:
+	card_effects.clear() # Clear existing effects for rebuild
+	
 	# Generic rules by value
 	var suits = ["club", "diamond", "heart", "spade"]
 	var special_values = ["A", "7", "9", "Q", "J"]
@@ -406,6 +431,10 @@ func _register_card_effects() -> void:
 	for suit in suits:
 		for value in special_values:
 			var card_name = suit + "_" + value
+			
+			# Check Global Rule
+			if not GameGlobals.is_rule_active(value):
+				continue # Skip registration (Effect defaults to Pass)
 			
 			match value:
 				"A": card_effects[card_name] = _effect_skip
@@ -415,29 +444,35 @@ func _register_card_effects() -> void:
 				"J": card_effects[card_name] = _effect_jack
 				
 	# Specific rules by name
-	card_effects["diamond_5"] = _effect_rotate_right_1
-	card_effects["heart_5"] = _effect_rotate_left_2
+	if GameGlobals.is_rule_active("5"):
+		card_effects["diamond_5"] = _effect_rotate_right_1
+		card_effects["heart_5"] = _effect_rotate_left_2
 	
 	# Jokers
-	card_effects["joker_red"] = _effect_joker
-	card_effects["joker_black"] = _effect_joker
+	if GameGlobals.is_rule_active("joker"):
+		card_effects["joker_red"] = _effect_joker
+		card_effects["joker_black"] = _effect_joker
 	
-	card_effects["club_4"] = _effect_club_4
-	card_effects["spade_4"] = _effect_spade_4
-	card_effects["heart_4"] = _effect_red_4
-	card_effects["diamond_4"] = _effect_red_4
+	# 4s (Lock & Unlock)
+	if GameGlobals.is_rule_active("4"):
+		card_effects["club_4"] = _effect_club_4
+		card_effects["spade_4"] = _effect_spade_4
+		card_effects["heart_4"] = _effect_red_4
+		card_effects["diamond_4"] = _effect_red_4
 	
 	# Register 8s
-	# Black 8s
-	card_effects["club_8"] = _effect_eight_black
-	card_effects["spade_8"] = _effect_eight_black
-	# Red 8s
-	card_effects["heart_8"] = _effect_eight_red
-	card_effects["diamond_8"] = _effect_eight_red
+	if GameGlobals.is_rule_active("8"):
+		# Black 8s
+		card_effects["club_8"] = _effect_eight_black
+		card_effects["spade_8"] = _effect_eight_black
+		# Red 8s
+		card_effects["heart_8"] = _effect_eight_red
+		card_effects["diamond_8"] = _effect_eight_red
 
 	# Register all 2s for Double Play
-	for suit in suits:
-		card_effects[suit + "_2"] = _effect_play_again
+	if GameGlobals.is_rule_active("2"):
+		for suit in suits:
+			card_effects[suit + "_2"] = _effect_play_again
 
 # Default effect: just pass the turn
 # Default effect: just pass the turn
@@ -810,7 +845,7 @@ func setup_ui() -> void:
 	hbox.add_child(spacer_end)
 	
 	# --- Game Log UI ---
-	var log_panel = PanelContainer.new()
+	log_panel = PanelContainer.new()
 	# Position below top bar
 	log_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	log_panel.position.y = top_bar.custom_minimum_size.y
@@ -825,6 +860,8 @@ func setup_ui() -> void:
 	log_bg.content_margin_bottom = 10
 	log_panel.add_theme_stylebox_override("panel", log_bg)
 	
+	log_panel.visible = GameGlobals.show_game_log # Respect initial setting
+	
 	hud_layer.add_child(log_panel)
 	
 	game_log_label = RichTextLabel.new()
@@ -838,11 +875,14 @@ func setup_ui() -> void:
 	update_player_stats()
 
 var game_log_label: RichTextLabel
+var log_panel: PanelContainer
 var options_menu: PanelContainer
 
 func _setup_options_menu() -> void:
 	options_menu = PanelContainer.new()
 	options_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	options_menu.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	options_menu.grow_vertical = Control.GROW_DIRECTION_BOTH
 	options_menu.visible = false # Hidden default
 	
 	# Style
@@ -866,7 +906,7 @@ func _setup_options_menu() -> void:
 	hud_layer.add_child(options_menu)
 	
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 15)
+	vbox.add_theme_constant_override("separation", 10)
 	options_menu.add_child(vbox)
 	
 	var title = Label.new()
@@ -875,20 +915,68 @@ func _setup_options_menu() -> void:
 	title.add_theme_font_size_override("font_size", 24)
 	vbox.add_child(title)
 	
+	# --- Visual Settings ---
+	var lbl_vis = Label.new(); lbl_vis.text = "Visual Assists"; vbox.add_child(lbl_vis)
+	_add_checkbox(vbox, "Show Side Bar", GameGlobals.show_effect_status_bar, func(v): 
+		GameGlobals.show_effect_status_bar = v
+		_update_hud_effects()
+	)
+	_add_checkbox(vbox, "Show Play Assist", GameGlobals.show_play_highlights, func(v): GameGlobals.show_play_highlights = v)
+	_add_checkbox(vbox, "Show Turn Highlight", GameGlobals.show_current_player_highlight, func(v): 
+		GameGlobals.show_current_player_highlight = v
+		update_turn_ui()
+	)
+	_add_checkbox(vbox, "Show Game Log", GameGlobals.show_game_log, func(v):
+		GameGlobals.show_game_log = v
+		if log_panel: log_panel.visible = v
+	)
+
+	vbox.add_child(HSeparator.new())
+
+	vbox.add_child(HSeparator.new())
+	
+	# --- Rule Settings ---
+	var lbl_rules = Label.new(); lbl_rules.text = "Active Rules (Requires Restart)"; vbox.add_child(lbl_rules)
+	
+	var rules_grid = GridContainer.new()
+	rules_grid.columns = 2
+	vbox.add_child(rules_grid)
+	
+	# Helper to create rule toggles
+	var rule_keys = GameGlobals.active_rules.keys()
+	rule_keys.sort()
+	for key in rule_keys:
+		if key == "0": continue # Skip typo
+		
+		var rule_name = "Rule " + key
+		if key == "joker": rule_name = "Jokers"
+		
+		# Capture key for closure
+		var current_key = key
+		_add_checkbox(rules_grid, rule_name, GameGlobals.active_rules[key], func(v): 
+			GameGlobals.active_rules[current_key] = v
+			_register_card_effects() # Re-register immediately
+			print("Rule " + current_key + " set to " + str(v))
+		)
+
+	vbox.add_child(HSeparator.new())
+
+	var btn_close = Button.new()
+	btn_close.text = "Close"
+	btn_close.pressed.connect(_on_close_menu_pressed)
+	vbox.add_child(btn_close)
+	
 	var btn_quit = Button.new()
 	btn_quit.text = "Quit Game"
 	btn_quit.pressed.connect(_on_quit_game_pressed)
 	vbox.add_child(btn_quit)
-	
-	var btn_ops = Button.new()
-	btn_ops.text = "Options"
-	btn_ops.pressed.connect(_on_options_pressed)
-	vbox.add_child(btn_ops)
-	
-	var btn_close = Button.new()
-	btn_close.text = "Close Window"
-	btn_close.pressed.connect(_on_close_menu_pressed)
-	vbox.add_child(btn_close)
+
+func _add_checkbox(parent: Control, text: String, default_val: bool, callback: Callable) -> void:
+	var cb = CheckBox.new()
+	cb.text = text
+	cb.button_pressed = default_val
+	cb.toggled.connect(callback)
+	parent.add_child(cb)
 
 func log_message(text: String) -> void:
 	if game_log_label:
@@ -908,12 +996,6 @@ func _on_pass_turn_pressed() -> void:
 	print("Pass Turn Pressed")
 	cycle_turn(1, false)
 
-func _update_hud_effects() -> void:
-	if effect_status_bar:
-		var current_suit = ""
-		if discard_pile:
-			current_suit = discard_pile.active_suit
-		effect_status_bar.update_status(active_effects, current_suit)
 		
 # --- Options Menu Callbacks ---
 func _on_settings_pressed() -> void:
