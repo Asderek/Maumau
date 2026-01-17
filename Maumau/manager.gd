@@ -60,142 +60,90 @@ func _ready() -> void:
 
 var top_bar_height: float = 0.0
 
+## Initializes the game state, UI, and table layout.
+##
+## This function handles:
+## - Calculating screen layout and scaling for large tables.
+## - Instantiating and positioning the Deck, Discard Pile, and Player Hands.
+## - Dealing initial cards and setting up the first turn.
+## - Rolling for initial game modes (MauMau vs WanWan).
 func setup_game() -> void:
-	# Initialize player count from Globals
 	num_players = GameGlobals.num_players
 	print("Starting game with ", num_players, " players.")
 	
 	var screen_size = get_viewport().get_visible_rect().size
-	
-	# Calculate Top Bar Height (5% of screen)
 	top_bar_height = screen_size.y * 0.05
 	
-	# Define available play area below the top bar
 	var available_rect = Rect2(0, top_bar_height, screen_size.x, screen_size.y - top_bar_height)
 	var center_point = available_rect.get_center()
 
-	# --- Dynamic Scaling for Crowded Tables ---
 	var global_scale_factor = Vector2.ONE
 	if num_players >= 8:
-		# User requested scaling for 8+ players to avoid crowding
-		# "Move Camera Back" effect = Scale Down Everything
 		global_scale_factor = Vector2(0.75, 0.75)
 		print("Large table detected (" + str(num_players) + " players). Scaling elements by 0.75x")
 
-	# 1. Instantiate and Shuffle Deck
 	deck = deck_scene.instantiate()
 	deck.name = "Deck"
 	card_manager.add_child(deck)
 	
-	# Configure Deck
 	deck.stack_direction = Pile.PileDirection.CENTER 
 	deck.card_face_up = false
 	deck.allow_card_movement = false 
-	deck.scale = global_scale_factor # Apply Scaler.add_child(deck)
-	
-	# Position Deck (Center Left of available area)
+	deck.scale = global_scale_factor
 	deck.position = center_point - (base_offset_deck * layout_scale)
 	
-	# Populate Deck
 	populate_deck()
-	
-	# Shuffle Deck
 	deck.shuffle()
-	
 	deck.card_pressed.connect(_on_deck_card_pressed)
 
-	# 2. Instantiate Discard Pile
 	discard_pile = discard_pile_scene.instantiate()
 	discard_pile.name = "DiscardPile"
 	discard_pile.stack_direction = Pile.PileDirection.RIGHT
-	discard_pile.scale = global_scale_factor # Apply Scale
+	discard_pile.scale = global_scale_factor
 	card_manager.add_child(discard_pile)
 	
-	# Position Discard Pile (Center Right of available area)
 	discard_pile.position = center_point + (base_offset_discard * layout_scale)
 	
-	# Note: Signal connection moved to AFTER initial deal to prevent first card from triggering turns/effects
-	
-	
-	
-	# 3. Instantiate Hands with positioning
 	for player in range(num_players):
 		var hand = hand_scene.instantiate()
 		hands_array.append(hand)
 		
-		# Apply Scale
 		hand.scale = global_scale_factor
-		
 		card_manager.add_child(hand)
 		
-		# Configure Hand
 		hand.max_hand_spread = 400
-		hand.card_face_up = true # DEBUG: All cards face up
-		
-		# Set Interaction Mode based on Jump-In Rule
+		hand.card_face_up = true 
 		hand.allow_remote_interaction = GameGlobals.is_rule_active("jump_in")
-		#if player == 0:
-		#	hand.card_face_up = true
-		#else:
-		#	hand.card_face_up = false # Opponent cards face down
 			
-		# Position Hands (Dynamic Layout)
 		var transform_data = _get_hand_transform(player, num_players, center_point, screen_size)
 		
 		hand.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 		hand.position = transform_data["position"]
 		hand.rotation = transform_data["rotation"]
 		
-		# Adjust card rotations for side players if needed (cleanup previous)
 		for card in hand._held_cards:
 			card.rotation_degrees = 0
-			# If hand is rotated 90 or 270 (Left/Right), we might typically rotate cards?
-			# But if the entire Hand node is rotated, the cards rotate with it.
-			# Previous logic had "card.rotation_degrees -= 90".
-			# Let's rely on Node rotation first. If visuals are odd, we can revisit.
-			pass
-			
-		# Correction for visual "facing":
-		# The Hand script arranges cards along X axis.
-		# If Hand is rotated, X axis rotates.
-		# So cards should align naturally along the table edge.
-		# However, for Left/Right players, the cards might look "sideways" if we don't counter-rotate?
-		# Let's stick to Node rotation: It represents the player's perspective.
-		
-		# Fix for Right Player (Index 3 in 4-player):
-		# Previous logic: rotation 270. card rotation -90.
-		# If we just rotate Hand 270, cards are sideways pointing IN.
-		# That seems correct for a "sitting at table" view.
 				
-	# 4. Randomize first player (Default)
 	current_player = (randi() % num_players) + 1
 	print("Randomly selected start player: ", current_player)
 
-	# 5. Run Debug Scenarios (Overrides Random Player & Pre-seeds Cards)
 	_run_debug_scenarios()
 
-	# 6. Deal Initial Cards (Fills remainder)
 	deal_initial_cards()
 	
-	# 7. Roll for Game Modes (Mau Mau vs Wan Wan)
 	_roll_initial_modes()
-	
-	# 8. Start Game (First card to discard)
-	# Only if not already set by debug
+
 	if discard_pile.get_card_count() == 0:
 		var initial_card = deck.get_top_cards(1)
 		if not initial_card.is_empty():
 			discard_pile.move_cards(initial_card)
 
-	# Connect Signal NOW, after initial card is placed
 	if not discard_pile.card_played.is_connected(_on_card_played):
 		discard_pile.card_played.connect(_on_card_played)
 		print("DEBUG: Manager connected to DiscardPile signal (Post-Setup).")
 
-	# 8. Current Player UI
 	player_label = Label.new()
 	card_manager.add_child(player_label)
-	# Position relative to deck, which is already correctly positioned in available area
 	player_label.position = deck.position + (base_offset_label * layout_scale) 
 	player_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	update_turn_ui()
@@ -330,15 +278,20 @@ func handle_highlight() -> void:
 				top_card.set_helper_display(true, can_accept)
 
 
+## Advances the turn to the next player.
+##
+## This function calculates the next player index based on the current play direction.
+## It handles wrapping around the player count (1-based index).
+##
+## Parameters:
+## - steps: Number of turns to advance (default 1).
+## - played_card: Whether the turn ended by playing a card (updates `last_player_who_played`).
 func cycle_turn(steps: int = 1, played_card: bool = false) -> void:
-	# Update last player ONLY if they played a card (passed turns don't count)
 	if played_card:
 		last_player_who_played = current_player
 	
-	# Calculate new player index with direction
 	var new_index = current_player + (steps * play_direction)
 	
-	# Wrap around logic (1-based index)
 	while new_index > num_players:
 		new_index -= num_players
 	while new_index < 1:
@@ -405,9 +358,11 @@ func _on_deck_card_pressed(_card: Card) -> void:
 	# (No cycle_turn here, player must choose to pass or play)
 	
 # Modified to fill hands up to the limit, allowing for pre-seeded debug cards
+## Deals initial cards to all players until they reach the hand limit.
+##
+## This function fills player hands using a round-robin approach.
+## It accounts for cards already present (e.g. from debug scenarios).
 func deal_initial_cards() -> void:
-	
-	# Round-robin deal until everyone has 'num_cards_in_hand'
 	var cards_needed = true
 	while cards_needed:
 		cards_needed = false
@@ -451,10 +406,19 @@ func populate_deck() -> void:
 
 
 
+## Handles the card played event.
+##
+## This is the core logic trigger when a card hits the discard pile.
+## - Detects "Jump-Ins" (Out of turn plays).
+## - Updates Play History.
+## - Dispatches the card execution to the registered effect handler.
+##
+## Parameters:
+## - card: The card object being played.
+## - player_source_index: The index of the player who played the card (1-based).
 func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 	_print_game_event("Plays Card", card.card_name)
 	
-	# Detect Jump-In (Out of Turn Play)
 	var is_jump_in = false
 	if player_source_index != -1 and player_source_index != current_player:
 		is_jump_in = true
@@ -462,10 +426,6 @@ func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 		log_message("!!! PLAYER %d JUMPED IN !!!" % player_source_index)
 		current_player = player_source_index
 		
-	# Optionally: Add visual flair here
-		# ...
-	
-	# --- Update Play History (Last 3 Cards) ---
 	var history_player = current_player
 	if player_source_index != -1:
 		history_player = player_source_index
@@ -483,13 +443,12 @@ func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 
 	log_message("Player %d played %s" % [current_player, card.card_name.replace("_", " ").capitalize()])
 	
-	# Dispatch to specific effect handler
 	var was_swap_active = active_effects.get("swap_next_mode", false)
 	if was_swap_active:
 		print("DEBUG: Swap Mode Active for this card!")
 		
 	if card_effects.has(card.card_name):
-		# RULE: If effects are blocked (Spade 4), only Red 4s can trigger their effect (Unlock).
+		# Effect Block Logic (Spade 4)
 		if active_effects.get("locked", false):
 			if card.card_name.begins_with("heart_4") or card.card_name.begins_with("diamond_4"):
 				print("DEBUG: Effect Dispatch: Red 4 Unblocker!")
@@ -505,7 +464,6 @@ func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 		print("DEBUG: Using default handler for ", card.card_name)
 		_effect_default(card)
 		
-	# Cleanup Swap Mode (Consumed)
 	if was_swap_active:
 		active_effects["swap_next_mode"] = false
 		log_message("Mode Swap consumed.")
@@ -515,10 +473,16 @@ func _on_card_played(card: Card, player_source_index: int = -1) -> void:
 
 var card_effects: Dictionary = {}
 
+## Maps card names to their specific effect handler functions.
+##
+## This function rebuilds the `card_effects` dictionary based on:
+## 1. Generic value-based rules (e.g. all Aces).
+## 2. Specific name-based rules (e.g. Diamond 5).
+## 3. Active Game Global rules (toggles).
+## 4. Jump-In rule configuration.
 func _register_card_effects() -> void:
-	card_effects.clear() # Clear existing effects for rebuild
+	card_effects.clear()
 	
-	# Generic rules by value
 	var suits = ["club", "diamond", "heart", "spade"]
 	var special_values = ["A", "7", "9", "Q", "J", "6", "10", "K"]
 	
@@ -526,9 +490,8 @@ func _register_card_effects() -> void:
 		for value in special_values:
 			var card_name = suit + "_" + value
 			
-			# Check Global Rule
 			if not GameGlobals.is_rule_active(value):
-				continue # Skip registration (Effect defaults to Pass)
+				continue
 			
 			match value:
 				"A": card_effects[card_name] = func(c): AceEffect.execute(self, c)
@@ -540,41 +503,33 @@ func _register_card_effects() -> void:
 				"10": card_effects[card_name] = func(c): TenEffect.execute(self, c)
 				"K": card_effects[card_name] = func(c): KingEffect.execute(self, c)
 				
-	# Specific rules by name
 	if GameGlobals.is_rule_active("5"):
 		card_effects["diamond_5"] = func(c): FiveEffect.execute_diamond(self, c)
 		card_effects["heart_5"] = func(c): FiveEffect.execute_heart(self, c)
 	
-	# Jokers
 	if GameGlobals.is_rule_active("joker"):
 		card_effects["joker_red"] = func(c): JokerEffect.execute(self, c)
 		card_effects["joker_black"] = func(c): JokerEffect.execute(self, c)
 	
-	# 4s (Lock & Unlock)
 	if GameGlobals.is_rule_active("4"):
 		card_effects["club_4"] = func(c): FourEffect.execute_club(self, c)
 		card_effects["spade_4"] = func(c): FourEffect.execute_spade(self, c)
 		card_effects["heart_4"] = func(c): FourEffect.execute_red(self, c)
 		card_effects["diamond_4"] = func(c): FourEffect.execute_red(self, c)
 	
-	# Register 8s
 	if GameGlobals.is_rule_active("8"):
 		for suit in suits:
-			# 8s currently in Manager (not fully extracted yet)
 			card_effects[suit + "_8"] = func(c): EightEffect.execute(self, c)
 
-	# Register 2s
 	if GameGlobals.is_rule_active("2"):
 		for suit in suits:
 			card_effects[suit + "_2"] = func(c): TwoEffect.execute(self, c)
 			
-	# --- Update Interaction based on Jump-In Rule ---
-	# If Jump-In is enabled, players must be able to drag cards out of turn.
 	var jump_in_active = GameGlobals.is_rule_active("jump_in")
 	if hands_array:
 		for hand in hands_array:
 			hand.allow_remote_interaction = jump_in_active
-			# If interaction was disabled by set_active(false), this override re-enables it.
+
 
 # Default effect: just pass the turn
 # Default effect: just pass the turn
@@ -585,151 +540,9 @@ func _effect_default(_card: Card) -> void:
 # --- Effect Handlers ---
 
 
-func _show_mimic_selector(on_final_selection: Callable) -> void:
-	var popup = PanelContainer.new()
-	popup.name = "MimicSelector"
-	
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.1, 0.95)
-	popup.add_theme_stylebox_override("panel", style)
-	
-	var margin = MarginContainer.new()
-	for k in ["top", "bottom", "left", "right"]: margin.add_theme_constant_override("margin_" + k, 10)
-	popup.add_child(margin)
-	
-	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 15)
-	margin.add_child(vbox)
-	
-	# Title
-	var label = Label.new()
-	label.text = "MIMICRY: Choose Suit & Rank"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(label)
-	
-	# State
-	var selection = {"suit": "", "rank": ""}
-	var suit_buttons = {}
-	var rank_buttons = {}
-	
-	# --- 3. Confirm Button (Created early for closure access) ---
-	var confirm_btn = Button.new()
-	confirm_btn.text = "Select Suit & Rank..."
-	confirm_btn.disabled = true
-	confirm_btn.custom_minimum_size = Vector2(0, 50)
-	confirm_btn.add_theme_font_size_override("font_size", 20)
-	
-	# Helper to update UI state
-	var update_ui = func():
-		# Highlights
-		for s in suit_buttons:
-			suit_buttons[s].modulate = Color(1, 1, 0) if s == selection.suit else Color(1, 1, 1)
-		for r in rank_buttons:
-			rank_buttons[r].modulate = Color(1, 1, 0) if r == selection.rank else Color(1, 1, 1)
-			
-		# Confirm Button
-		if selection.suit != "" and selection.rank != "":
-			confirm_btn.disabled = false
-			confirm_btn.text = "MIMIC %s %s" % [selection.suit.capitalize(), selection.rank]
-		else:
-			confirm_btn.disabled = true
-			confirm_btn.text = "Select Suit & Rank..."
 
-	# --- 1. Suit Selection ---
-	var suit_container = HBoxContainer.new()
-	suit_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	suit_container.add_theme_constant_override("separation", 10)
-	vbox.add_child(suit_container)
-	
-	var suits = ["spade", "heart", "club", "diamond"]
-	for s in suits:
-		var btn = Button.new()
-		btn.text = s.capitalize()
-		btn.custom_minimum_size = Vector2(70, 40)
-		btn.pressed.connect(func():
-			selection.suit = s
-			update_ui.call()
-		)
-		suit_container.add_child(btn)
-		suit_buttons[s] = btn
-		
-	# --- 2. Rank Selection ---
-	var grid = GridContainer.new()
-	grid.columns = 7
-	grid.add_theme_constant_override("h_separation", 5)
-	grid.add_theme_constant_override("v_separation", 5)
-	vbox.add_child(grid)
-	
-	# Ranks (No 2)
-	var ranks = ["A", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "Joker"]
-	for r in ranks:
-		var btn = Button.new()
-		btn.text = r
-		btn.custom_minimum_size = Vector2(40, 40)
-		btn.pressed.connect(func():
-			selection.rank = r
-			update_ui.call()
-		)
-		grid.add_child(btn)
-		rank_buttons[r] = btn
-		
-	# Add Confirm Button at the end
-	confirm_btn.pressed.connect(func():
-		popup.queue_free()
-		on_final_selection.call(selection.rank, selection.suit)
-	)
-	vbox.add_child(confirm_btn)
-		
-	hud_layer.add_child(popup)
-	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
 
-	# If he has no valid cards, he must draw. Logic to be enforced by player interaction.
 
-	# Ace (Handled by Modular Effect)
-	# Functions removed.
-
-func _show_blind_hand_selector(target_idx: int, on_selected: Callable) -> void:
-	var target_hand = hands_array[target_idx - 1]
-	var cards = target_hand._held_cards
-	
-	if cards.is_empty():
-		log_message("Target has no cards!")
-		cycle_turn(1)
-		return
-		
-	var popup = PanelContainer.new()
-	popup.name = "HandSelector"
-	
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.1, 0.95)
-	popup.add_theme_stylebox_override("panel", style)
-	
-	var margin = MarginContainer.new()
-	for k in ["top", "bottom", "left", "right"]: margin.add_theme_constant_override("margin_" + k, 20)
-	popup.add_child(margin)
-	
-	var grid = GridContainer.new()
-	grid.columns = 5
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 10)
-	margin.add_child(grid)
-	
-	for c in cards:
-		var btn = Button.new()
-		btn.text = "?"
-		btn.custom_minimum_size = Vector2(50, 70)
-		btn.pressed.connect(func():
-			popup.queue_free()
-			on_selected.call(c)
-		)
-		grid.add_child(btn)
-		
-	hud_layer.add_child(popup)
-	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 # 7: Next player draws 2 and is skipped
 # K: The Silence (King)
@@ -739,69 +552,7 @@ func _show_blind_hand_selector(target_idx: int, on_selected: Callable) -> void:
 # 9: Last player who played draws 1 (Stacking allowed via History)
 
 
-func _show_player_selector(picker_idx: int, on_selected: Callable, excluded_idx: int = -1) -> void:
-	# Quick Procedural UI
-	var popup = PanelContainer.new()
-	popup.name = "PlayerSelector"
-	
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.2, 0.0, 0.0, 0.9)
-	style.border_width_bottom = 2
-	style.border_color = Color.RED
-	style.corner_radius_top_left = 10
-	style.corner_radius_top_right = 10
-	style.corner_radius_bottom_left = 10
-	style.corner_radius_bottom_right = 10
-	popup.add_theme_stylebox_override("panel", style)
-	
-	# 1. Main Container (Padding)
-	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_bottom", 20)
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 20)
-	popup.add_child(margin)
-	
-	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 20)
-	margin.add_child(vbox)
-	
-	var label = Label.new()
-	label.text = "PLAYER %d, CHOOSE A VICTIM" % picker_idx
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(label)
-	
-	var grid = GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 15)
-	grid.add_theme_constant_override("v_separation", 15)
-	vbox.add_child(grid)
-	
-	for i in range(1, num_players + 1):
-		# Exclusion check
-		if i == excluded_idx:
-			continue
-			
-		var btn = Button.new()
-		btn.text = "Player %d" % i
-		btn.custom_minimum_size = Vector2(100, 60) # Bigger buttons
-		btn.pressed.connect(func(): 
-			popup.queue_free()
-			on_selected.call(i)
-		)
-		grid.add_child(btn)
-		
-	hud_layer.add_child(popup)
-	popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	popup.grow_vertical = Control.GROW_DIRECTION_BOTH
-	
-	# 5s (Handled by Modular Effect)
 
-# Joker: Draw 4 + Skip + Choose Suit (Stacking)
-# Joker: Draw 4 + Skip + Choose Suit (Stacking)
-# Joker: Draw 4 + Skip + Choose Suit (Stacking)
 
 
 func _on_card_drag_started(card: Card) -> void:
@@ -1232,31 +983,29 @@ func _get_hand_transform(player_idx: int, total_players: int, center: Vector2, s
 		result.face_up = (player_idx == 0)
 
 	return result
+## Handles debug input events.
+##
+## Debug Controls:
+## - 'D': Rolls a random die for ALL players (and updates mode).
+## - '0-9': Rolls a random die for a specific player (1-9) (and updates mode).
 func _input(event: InputEvent) -> void:
 	if not event.is_pressed(): return
 	if not event is InputEventKey: return
 	
-	# Debug: Roll Die with 'D' (All Players)
 	if event.keycode == KEY_D:
 		log_message("Debug: Rolling dice for ALL players!")
 		for p_idx in range(1, num_players + 1):
 			var val = randi() % 6 + 1
 			show_dice_roll(p_idx, val)
-			# Re-evaluated modes on debug roll if desired? 
-			# User said: "On a even... mau mau, on a odd... wan wan".
-			# Does 'D' debug roll trigger mode change? User: "When the game starts all players roll... (function 'D')... we'll need to store the value".
-			# So yes, 'D' should update mode? Or creates separate function?
-			# Let's update mode here to verify behavior dynamically.
+			
 			if val % 2 == 0:
 				_set_player_mode(p_idx, MODE_MAUMAU)
 			else:
 				_set_player_mode(p_idx, MODE_WANWAN)
 			
-	# Debug: Roll Die for specific player (1-9)
 	elif event.keycode >= KEY_0 and event.keycode <= KEY_9:
 		var p_idx = event.keycode - KEY_0
 		if p_idx >= 1 and p_idx <= num_players:
-			# Update mode for specific player too
 			var val = randi() % 6 + 1
 			show_dice_roll(p_idx, val)
 			if val % 2 == 0:
