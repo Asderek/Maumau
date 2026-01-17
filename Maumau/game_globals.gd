@@ -23,7 +23,8 @@ var active_rules: Dictionary = {
 	"A": true,
 	"joker": true,  # Draw 4 Stack
 	"jump_in": true, # Doubling / Interception
-	"6": true       # Rule 666
+	"6": true,       # Rule 666
+	"10": true       # Simon Says
 }
 
 func is_rule_active(rule_key: String) -> bool:

@@ -10,9 +10,12 @@ var hands_array: Array[Hand] = [];
 # Called when the node enters the scene tree for the first time.
 @export var deck_scene: PackedScene = preload("res://addons/card-framework/pile.tscn")
 @export var discard_pile_scene: PackedScene = preload("res://Maumau/mau_mau_pile.tscn")
+@export var simon_popup_scene: PackedScene = preload("res://Maumau/simon_says_popup.tscn")
+
 # UI Scenes for Effects
 var suit_selector_scene: PackedScene = preload("res://Maumau/suit_selector.tscn")
 var speech_bubble_scene: PackedScene = preload("res://Maumau/speech_bubble.tscn")
+var simon_popup: Control
 
 var player_labels: Array[Label] = []
 
@@ -180,6 +183,12 @@ var last_player_who_played: int = -1
 var play_history: Array = [] 
 # Rule 666 State
 var devil_awakened: bool = false
+# Rule 10 (Simon Says) State
+var word_chain: Array[String] = []
+var simon_dict_mode: String = "PT" # or "EN"
+var dict_en: Array[String] = ["Rat", "Car", "Dog", "Bus", "Sky", "Tea", "Cup", "Box", "Fox", "Bat", "Hat", "Sun", "Moon", "Run", "Fun", "Eat", "Cat", "Cow", "Pig", "Hen", "Pen", "Map", "Key", "Egg", "Pie"]
+var dict_pt: Array[String] = ["Pao", "Sol", "Lua", "Flor", "Ceu", "Mar", "Rio", "Luz", "Cor", "Som", "Sal", "Mao", "Pe", "Dor", "Fim", "Sim", "Nao", "Voz", "Paz", "Gol", "Trem", "Boi", "Cao", "Lar", "Mel"]
+
 var pending_turn_skip: int = 1 # Default to 1 (Next player). Joker sets this to 2 (Skip).
 var active_effects: Dictionary = {
 	"locked": false,          # Spade 4
@@ -460,7 +469,7 @@ func _register_card_effects() -> void:
 	
 	# Generic rules by value
 	var suits = ["club", "diamond", "heart", "spade"]
-	var special_values = ["A", "7", "9", "Q", "J", "6"]
+	var special_values = ["A", "7", "9", "Q", "J", "6", "10"]
 	
 	for suit in suits:
 		for value in special_values:
@@ -477,6 +486,7 @@ func _register_card_effects() -> void:
 				"Q": card_effects[card_name] = _effect_reverse
 				"J": card_effects[card_name] = _effect_jack
 				"6": card_effects[card_name] = _effect_six
+				"10": card_effects[card_name] = _effect_ten
 				
 	# Specific rules by name
 	if GameGlobals.is_rule_active("5"):
@@ -790,6 +800,7 @@ func _effect_rotate_left_2(_card: Card) -> void:
 	cycle_turn(1)
 
 # Joker: Draw 4 + Skip + Choose Suit (Stacking)
+# Joker: Draw 4 + Skip + Choose Suit (Stacking)
 func _effect_joker(_card: Card) -> void:
 	_print_game_event("Effect Triggered", "Stacking Joker (+4)")
 	log_message("Joker! +4 Cards! Stack or Draw!")
@@ -797,14 +808,73 @@ func _effect_joker(_card: Card) -> void:
 	pending_penalty += 4
 	penalty_type = "joker"
 	
+	# Sync failure to pile
 	discard_pile.pending_penalty = pending_penalty
 	discard_pile.penalty_type = penalty_type
 	
-	# Current player chooses suit naturally via Jack effect UI
-	# After suit selected, it cycles turn by 1 (Next player must respond)
-	# We DO NOT set pending_turn_skip to 2 here anymore.
+	# Pass control to Jack effect for Suit Selection, which then cycles turn.
+	# Note: Joker skips 1 person, so generally next player is skipped.
+	# But Jack effect sets pending_turn_skip = 1 (default).
+	# Joker should set pending_turn_skip = 2 (Skip).
+	pending_turn_skip = 2
 	
 	_effect_jack(_card)
+
+# 10: Simon Says (Word Memory)
+func _effect_ten(_card: Card) -> void:
+	print("Effect: Simon Says (10)")
+	
+	# Block interaction
+	_set_hands_interaction(false) 
+	
+	# Challenge Phase
+	if not word_chain.is_empty():
+		log_message("Simon Says: Recite the chain!")
+		for i in range(word_chain.size()):
+			var correct = word_chain[i]
+			var options = _generate_simon_options(correct)
+			
+			log_message("Challenge %d/%d..." % [i + 1, word_chain.size()])
+			simon_popup.start_challenge(correct, options)
+			
+			var success = await simon_popup.challenge_completed
+			if not success:
+				log_message("WRONG! The chain breaks!")
+				var penalty = word_chain.size() + 1
+				var victim_hand = hands_array[current_player - 1]
+				distribute_cards(victim_hand, penalty)
+				word_chain.clear()
+				_finish_simon_turn(false)
+				return # Exit immediately on failure
+	
+	# Input Phase (If success or empty)
+	log_message("Simon Says: Add a new word!")
+	simon_popup.start_input_mode()
+	var new_word = await simon_popup.word_submitted
+	log_message("Player wrote: " + new_word)
+	word_chain.append(new_word)
+	_finish_simon_turn(true)
+
+func _finish_simon_turn(success: bool) -> void:
+	# Restore interaction
+	_set_hands_interaction(true)
+	cycle_turn(1)
+
+func _generate_simon_options(correct: String) -> Array[String]:
+	var opts: Array[String] = [correct]
+	var pool = dict_pt if simon_dict_mode == "PT" else dict_en
+	pool.shuffle()
+	
+	for w in pool:
+		if w != correct and opts.size() < 4:
+			opts.append(w)
+			
+	opts.shuffle()
+	return opts
+
+func _set_hands_interaction(enabled: bool) -> void:
+	for hand in hands_array:
+		hand.allow_remote_interaction = enabled
 
 # Club 4: Clears Active Effects (8s, Kings, Queens/Direction)
 # DOES NOT clear Spade 4 Lock.
@@ -971,6 +1041,11 @@ func setup_ui() -> void:
 	# Load script directly since we don't have a scene file yet, or use class_name
 	effect_status_bar = EffectStatusBar.new()
 	hud_layer.add_child(effect_status_bar)
+
+	# --- Simon Says Popup ---
+	if simon_popup_scene:
+		simon_popup = simon_popup_scene.instantiate()
+		hud_layer.add_child(simon_popup)
 	
 	# Calculate Max Height (10% of screen)
 	var bar_height = screen_size.y * 0.10
