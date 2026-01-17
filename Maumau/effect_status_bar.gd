@@ -2,9 +2,10 @@ extends PanelContainer
 
 class_name EffectStatusBar
 
+
 # UI References
 var icon_container: HBoxContainer
-var icons: Dictionary = {} # Map effect_key -> TextureRect
+var icons: Dictionary = {} # Map effect_key -> TextureRect OR Control
 
 # Assets (Preload or load dynamically)
 # We will load generic card images to represent the effects
@@ -50,11 +51,25 @@ func setup_ui() -> void:
 	# Slot 3: Red 8 (Heart 8)
 	_add_icon_slot("eight_red", "cardHearts8.png", "Masquerade (Red)")
 	
-	# Slot 4: Active Suit (Dynamic)
-	_add_icon_slot("active_suit", "cardJoker.png", "Active Suit")
+	# Slot 5: Silence (King)
+	_add_icon_slot("silence", "cardSpadesK.png", "Silence (King)")
+	
+	# Slot 6: Direction (Queen)
+	# Use procedural arrow instead of image
+	var arrow = DirectionArrow.new()
+	arrow.tooltip_text = "Play Direction"
+	_add_custom_element("direction", arrow)
 	
 	# Initialize state
 	reset_all()
+
+func _add_custom_element(key: String, node: Control) -> void:
+	var wrapper = VBoxContainer.new()
+	wrapper.alignment = BoxContainer.ALIGNMENT_CENTER
+	wrapper.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	wrapper.add_child(node)
+	icon_container.add_child(wrapper)
+	icons[key] = node
 
 func _add_icon_slot(key: String, image_filename: String, tooltip: String) -> void:
 	# Wrapper
@@ -72,15 +87,20 @@ func _add_icon_slot(key: String, image_filename: String, tooltip: String) -> voi
 	texture_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	# Initial Min Size (Generic, allows shrinking but starts reasonable)
-	# Force WIDTH so it doesn't collapse to 0
-	texture_rect.custom_minimum_size = Vector2(40, 0)
+	# Force WIDTH and HEIGHT so it doesn't collapse to 0
+	texture_rect.custom_minimum_size = Vector2(55, 55)
 	
 	# Load Texture
-	var texture = load(asset_path + image_filename)
+	var full_path = asset_path + image_filename
+	print("DEBUG: Loading icon from: " + full_path)
+	var texture = _load_texture_safe(full_path)
+	
 	if texture:
 		texture_rect.texture = texture
+		print("DEBUG: Successfully loaded icon: " + image_filename)
 	else:
-		push_warning("Icon not found: " + asset_path + image_filename)
+		push_warning("Icon not found after fallback: " + full_path)
+		print("DEBUG: FAILED to load icon: " + image_filename)
 		
 	texture_rect.tooltip_text = tooltip
 	
@@ -90,26 +110,48 @@ func _add_icon_slot(key: String, image_filename: String, tooltip: String) -> voi
 	# Store reference
 	icons[key] = texture_rect
 
-func update_status(active_effects: Dictionary, current_active_suit: String) -> void:
+func _load_texture_safe(path: String) -> Texture2D:
+	# 1. Try Standard Resource Load
+	if ResourceLoader.exists(path):
+		var res = load(path)
+		if res is Texture2D:
+			return res
+			
+	# 2. Fallback: Load Image from File System (Bypasses Import Cache glitches)
+	print("DEBUG: ResourceLoader failed for " + path + ". Trying Image load...")
+	var img = Image.new()
+	var global_path = ProjectSettings.globalize_path(path)
+	var err = img.load(global_path)
+	if err == OK:
+		return ImageTexture.create_from_image(img)
+	else:
+		# Fallback 2.5: Try relative path mapping if ProjectSettings fails or runs in editor
+		# Sometimes globalize_path is weird.
+		print("DEBUG: Image load failed with error " + str(err) + " at " + global_path)
+		return null
+
+func update_status(active_effects: Dictionary, play_direction: int) -> void:
 	# 1. Update Boolean Effects
 	_set_icon_state("locked", active_effects.get("locked", false))
 	_set_icon_state("eight_black", active_effects.get("eight_black", false))
 	_set_icon_state("eight_red", active_effects.get("eight_red", false))
+	_set_icon_state("silence", active_effects.get("silence", false))
 	
-	# 2. Update Active Suit
-	var suit_icon = icons["active_suit"]
-	if current_active_suit == "":
-		_set_icon_state("active_suit", false)
-		suit_icon.texture = load(asset_path + "cardJoker.png") 
-		suit_icon.tooltip_text = "No Active Suit"
-	else:
-		_set_icon_state("active_suit", true)
-		# Load representative card for the suit (e.g., Ace)
-		var suit_card_img = "card" + current_active_suit.capitalize() + "A.png"
-		suit_icon.texture = load(asset_path + suit_card_img)
-		suit_icon.tooltip_text = "Required Suit: " + current_active_suit
-		# Always fully visible if active
-		suit_icon.modulate = Color(1.0, 1.0, 1.0, 1.0) 
+	# 2. Update Direction Icon
+	if icons.has("direction"):
+		var icon = icons["direction"]
+		if icon.has_method("set_visible"): # Check for base Control method
+			# Ensure it's visible (Control property) but our custom "state" logic handled modulate usually?
+			# Actually our inner class handles drawing. We don't need _set_icon_state for it unless we modulate it.
+			icon.modulate = Color(1, 1, 1, 1) # Always fully visible
+			
+		if icon is DirectionArrow:
+			# Clockwise (1) = Pass Left (Green Left)
+			# Counter (-1) = Pass Right (Green Right)
+			if play_direction == 1:
+				icon.pointing_left = true
+			else:
+				icon.pointing_left = false
 
 func _set_icon_state(key: String, is_active: bool) -> void:
 	if not icons.has(key): return

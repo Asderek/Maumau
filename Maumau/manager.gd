@@ -194,6 +194,7 @@ var active_effects: Dictionary = {
 	"locked": false,          # Spade 4
 	"eight_black": false,     # Black 8s
 	"eight_red": false,       # Red 8s
+	"silence": false          # King (The Silence)
 }
 # Stacking Penalties
 var pending_penalty: int = 0
@@ -254,10 +255,8 @@ func _update_hud_effects() -> void:
 	if effect_status_bar:
 		if GameGlobals.show_effect_status_bar:
 			effect_status_bar.visible = true
-			var current_suit = ""
-			if discard_pile:
-				current_suit = discard_pile.active_suit
-			effect_status_bar.update_status(active_effects, current_suit)
+			effect_status_bar.visible = true
+			effect_status_bar.update_status(active_effects, play_direction)
 		else:
 			effect_status_bar.visible = false
 
@@ -403,6 +402,10 @@ func populate_deck() -> void:
 			var card = card_manager.card_factory.create_card(card_name, deck)
 			if card == null:
 				push_error("Failed to create card: " + card_name)
+			else:
+				# Connect King Rule Signal
+				if not card.drag_started.is_connected(_on_card_drag_started):
+					card.drag_started.connect(_on_card_drag_started)
 
 	print("Deck populated with ", deck.get_card_count(), " cards (Double Deck).")
 
@@ -469,7 +472,7 @@ func _register_card_effects() -> void:
 	
 	# Generic rules by value
 	var suits = ["club", "diamond", "heart", "spade"]
-	var special_values = ["A", "7", "9", "Q", "J", "6", "10"]
+	var special_values = ["A", "7", "9", "Q", "J", "6", "10", "K"]
 	
 	for suit in suits:
 		for value in special_values:
@@ -487,6 +490,7 @@ func _register_card_effects() -> void:
 				"J": card_effects[card_name] = _effect_jack
 				"6": card_effects[card_name] = _effect_six
 				"10": card_effects[card_name] = _effect_ten
+				"K": card_effects[card_name] = _effect_king
 				
 	# Specific rules by name
 	if GameGlobals.is_rule_active("5"):
@@ -566,6 +570,58 @@ func _effect_skip(_card: Card) -> void:
 	cycle_turn(2)
 
 # 7: Next player draws 2 and is skipped
+# K: The Silence (King)
+func _effect_king(_card: Card) -> void:
+	print("Effect: King (Silence)")
+	
+	if active_effects["silence"]:
+		log_message("The King speaks! Silence is broken.")
+		active_effects["silence"] = false
+		_update_hud_effects()
+		if hud_layer:
+			var bubble = speech_bubble_scene.instantiate()
+			hud_layer.add_child(bubble)
+			bubble.global_position = hands_array[current_player - 1].get_global_transform_with_canvas().origin + Vector2(0, -100)
+			bubble.show_message("Speak freely!", 2.0)
+	else:
+		log_message("The King commands SILENCE!")
+		active_effects["silence"] = true
+		_update_hud_effects()
+		if hud_layer:
+			var bubble = speech_bubble_scene.instantiate()
+			hud_layer.add_child(bubble)
+			bubble.global_position = hands_array[current_player - 1].get_global_transform_with_canvas().origin + Vector2(0, -100)
+			bubble.show_message("Silence!", 2.0)
+			
+	cycle_turn(1)
+
+func _on_card_drag_started(card: Card) -> void:
+	if not active_effects["silence"]:
+		return
+		
+	# Verify if move is valid
+	var can_play = discard_pile._card_can_be_added([card])
+	
+	if not can_play:
+		print("SILENCE BROKEN! Invalid drag attempt.")
+		log_message("Silence Broken! Penalty: 2 Cards.")
+		
+		# Cancel Drag and Snap Back
+		card.change_state(Card.DraggableState.IDLE)
+		card.position = card.original_position
+		card.rotation = card.original_hover_rotation
+		card.scale = card.original_scale
+		
+		# Apply Penalty
+		# Target is the owner of the card.
+		# card.card_container should be the Hand.
+		var owner_hand = card.card_container
+		if owner_hand is Hand:
+			distribute_cards(owner_hand, 2)
+		else:
+			# Fallback if weird parenting
+			distribute_cards(hands_array[current_player - 1], 2)
+
 # 7: Next player draws 2 (Stackable)
 func _effect_draw_2_skip(_card: Card) -> void:
 	_print_game_event("Effect Triggered", "Stacking 7 (+2)")
@@ -723,8 +779,8 @@ func _effect_reverse(_card: Card) -> void:
 	print("Effect: Reverse (Q)")
 	log_message("Effect: Direction Reversed!")
 	play_direction *= -1
-	play_direction *= -1
-	cycle_turn(1, true) # Move to next in new direction
+	_update_hud_effects()
+	cycle_turn(1)
 	
 # J: Wildcard with Suit Selection
 func _effect_jack(_card: Card) -> void:
@@ -887,6 +943,7 @@ func _effect_club_4(_card: Card) -> void:
 	active_effects["eight_black"] = false
 	active_effects["eight_red"] = false
 	discard_pile.active_effect_eight_red = false
+	active_effects["silence"] = false
 	
 	# Note: Club 4 does NOT clear Spade 4 Lock (active_effects["locked"])
 	# So we don't reset discard_pile.active_effect_locked here unless rule changes.

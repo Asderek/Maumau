@@ -38,6 +38,8 @@ enum DraggableState {
 	MOVING      ## Programmatic move state - ignores input
 }
 
+signal drag_started(object)
+
 ## The speed at which the objects moves.
 @export var moving_speed: int = CardFrameworkSettings.ANIMATION_MOVE_SPEED
 ## Whether the object can be interacted with.
@@ -171,6 +173,8 @@ func _enter_state(state: DraggableState, from_state: DraggableState) -> void:
 			# Detach from parent transform to avoid scaling/rotation issues from Hand
 			top_level = true
 			rotation = 0
+			
+			drag_started.emit(self)
 			
 		DraggableState.MOVING:
 			# Stop hover animations and ignore input during programmatic movement
