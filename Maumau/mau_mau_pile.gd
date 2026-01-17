@@ -12,6 +12,11 @@ var input_disabled: bool = false # Used to block play during effects/animations
 # Rule 8s: Suit Masquerade State
 var active_effect_eight_black: bool = false
 var active_effect_eight_red: bool = false
+# Rule 4s: Lock State (Prevents Joker)
+var active_effect_locked: bool = false
+# Penalty Stacking
+var pending_penalty: int = 0
+var penalty_type: String = "" # "7" or "joker"
 
 # Rule 2: Free Play (Next card can be anything)
 var free_play_active: bool = false
@@ -52,6 +57,25 @@ func _card_can_be_added(_cards: Array) -> bool:
 	if top.is_empty():
 		return true;
 		
+	# 2. Active Penalty Check (Stacking 7s or Jokers)
+	# This MUST come before Wildcards/FreePlay/etc.
+	if pending_penalty > 0:
+		# If there is a penalty stack, player MUST play a matching card (Stacking)
+		# e.g. If source is "7", must play "7". If "joker", must play "joker".
+		
+		var type_match = false
+		if penalty_type == "7" and candidate_value == "7":
+			type_match = true
+		elif penalty_type == "joker" and candidate_value == "joker":
+			type_match = true
+			
+		if not type_match:
+			if Alert: Alert.text = "Penalidade Ativa! Jogue " + penalty_type + " ou compre cartas."
+			return false
+			
+		# If match, allow it.
+		return true
+		
 	# 1.5 Free Play Active (Rule 2)
 	if free_play_active:
 		if Alert: Alert.text = "Free Play! Any card allowed."
@@ -64,17 +88,34 @@ func _card_can_be_added(_cards: Array) -> bool:
 	
 	# 3. Jack and Joker are wildcards (can be played on anything)
 	if candidate_value == "J" or candidate_value == "joker":
-		if Alert: Alert.text = "Coringa! Pode jogar."
-		return true
+		# RULE: If effects are Locked (Spade 4), Joker cannot be played.
+		if active_effect_locked and candidate_value == "joker":
+			if Alert: Alert.text = "Bloqueado! Efeito do 4 de Espadas proíbe Coringa."
+			return false
+			
+		# RULE: If effects are Locked (Spade 4), Jack acts as NORMAL card (not wildcard).
+		if active_effect_locked and candidate_value == "J":
+			# Fall through to standard validation (must match suit or rank)
+			pass
+		else:
+			if Alert: Alert.text = "Coringa! Pode jogar."
+			return true
 
 	# 4. Check against Active Suit
 	# If Active Suit is set (from Jack), we MUST match it (unless playing another wildcard)
 	if active_suit != "":
+		# LOGIC FIX: The Active Suit is the REQUIREMENT. The Requirement is subject to Masquerade.
+		# The Candidate Card is the PHYSICAL card you play. It is NOT subject to masquerade when checking if it MATCHES.
+		# Example: Requirement "Spade". Black 8 Active (Spade->Club). Effective Requirement "Club".
+		# You must play a PHYSICAL Club.
+		
+		var effective_requirement = _get_effective_suit(active_suit)
+
 		# If we play a wildcard, it's checked in step 3.
-		if candidate_suit == active_suit:
+		if candidate_suit == effective_requirement:
 			return true
 		else:
-			if Alert: Alert.text = "Invalido! Naipe pedido: " + active_suit
+			if Alert: Alert.text = "Invalido! Naipe pedido: " + active_suit + " (" + effective_requirement + ")"
 			return false
 
 	# 5. Standard MauMau Validation (Suit OR Rank)
@@ -84,20 +125,13 @@ func _card_can_be_added(_cards: Array) -> bool:
 		var top_value = top_card.card_info["value"]
 		
 		# --- Rule 8s: Masquerade Logic ---
-		# If effect is active, SWAP the effective suit of the TOP card (not the candidate)
-		# "Black cards on top count as opposite suit"
+		# Determine effective suits for Top Card (The "Table" State)
+		var effective_top_suit = _get_effective_suit(top_suit)
 		
-		var effective_top_suit = top_suit
-		
-		if active_effect_eight_black:
-			if top_suit == "club": effective_top_suit = "spade"
-			elif top_suit == "spade": effective_top_suit = "club"
-			
-		if active_effect_eight_red:
-			if top_suit == "heart": effective_top_suit = "diamond"
-			elif top_suit == "diamond": effective_top_suit = "heart"
-			
-		# ---------------------------------
+		# LOGIC FIX: Determine match against PHYSICAL candidate
+		# "Heart on Heart is illegal" (Red 8 Active: Heart->Diamond).
+		# Top: Heart (Eff: Diamond). Candidate: Heart. Match? No.
+		# Top: Heart (Eff: Diamond). Candidate: Diamond. Match? Yes.
 		
 		if candidate_suit == effective_top_suit:
 			return true
@@ -114,3 +148,15 @@ func _card_can_be_added(_cards: Array) -> bool:
 	if Alert:
 		Alert.text = "Jogada invalida! Precisa de " + active_suit + " ou J."
 	return false;
+
+# Helper to calculate suit under Masquerade rules
+func _get_effective_suit(base_suit: String) -> String:
+	if active_effect_eight_black:
+		if base_suit == "club": return "spade"
+		if base_suit == "spade": return "club"
+		
+	if active_effect_eight_red:
+		if base_suit == "heart": return "diamond"
+		if base_suit == "diamond": return "heart"
+		
+	return base_suit

@@ -151,9 +151,11 @@ func setup_game() -> void:
 	deal_initial_cards()
 	
 	# 7. Start Game (First card to discard)
-	var initial_card = deck.get_top_cards(1)
-	if not initial_card.is_empty():
-		discard_pile.move_cards(initial_card)
+	# Only if not already set by debug
+	if discard_pile.get_card_count() == 0:
+		var initial_card = deck.get_top_cards(1)
+		if not initial_card.is_empty():
+			discard_pile.move_cards(initial_card)
 
 	# Connect Signal NOW, after initial card is placed
 	if not discard_pile.card_played.is_connected(_on_card_played):
@@ -177,6 +179,15 @@ var active_effects: Dictionary = {
 	"eight_black": false,     # Black 8s
 	"eight_red": false,       # Red 8s
 }
+# Stacking Penalties
+var pending_penalty: int = 0
+var penalty_type: String = "" # "7" or "joker"
+
+var turn_counter: int = 1
+
+func _print_game_event(action: String, details: String = "") -> void:
+	print("Turn %d | Player %d: %s %s" % [turn_counter, current_player, action, details])
+
 
 var selected_card_index = 0
 
@@ -188,11 +199,12 @@ func _process(_delta: float) -> void:
 	
 	# Cycle Turn (Space)
 	if Input.is_action_just_pressed("ui_accept"): 
-		cycle_turn()
+		cycle_turn(1, false)
 
-func cycle_turn(steps: int = 1) -> void:
-	# Update last player BEFORE moving turn
-	last_player_who_played = current_player
+func cycle_turn(steps: int = 1, played_card: bool = false) -> void:
+	# Update last player ONLY if they played a card (passed turns don't count)
+	if played_card:
+		last_player_who_played = current_player
 	
 	# Calculate new player index with direction
 	var new_index = current_player + (steps * play_direction)
@@ -204,6 +216,7 @@ func cycle_turn(steps: int = 1) -> void:
 		new_index += num_players
 		
 	current_player = new_index
+	turn_counter += 1
 	update_turn_ui()
 
 func get_next_player_index(steps: int = 1) -> int:
@@ -245,12 +258,40 @@ func update_turn_ui() -> void:
 			hand.set_highlight(false)
 
 func _on_deck_card_pressed(_card: Card) -> void:
-	if current_player >= 1 and current_player <= hands_array.size():
-		var card_array = deck.get_top_cards(1)
-		if not card_array.is_empty():
-			hands_array[current_player - 1].move_cards(card_array)
-			update_player_stats()
-
+	# Check if it is current player's turn (handled by UI input block mostly, but safeguard)
+	# For now assuming UI handles turn blocking.
+	
+	var current_hand = hands_array[current_player - 1]
+	
+	# Penalty Logic
+	if pending_penalty > 0:
+		_print_game_event("ACCEPTS PENALTY", "Draws " + str(pending_penalty) + " cards (" + penalty_type + ")")
+		log_message("Player %d accepts penalty! Draws %d cards." % [current_player, pending_penalty])
+		distribute_cards(current_hand, pending_penalty)
+		
+		# Reset Penalty
+		pending_penalty = 0
+		penalty_type = ""
+		discard_pile.pending_penalty = 0
+		discard_pile.penalty_type = ""
+		
+		# Skip Turn (Penalty for not stacking)
+		cycle_turn(1) # Wait, is it Skip (2) or just End Turn (1)?
+		# Rule says: "sending to the next player. So the result is player 3 draws 4 and skips."
+		# This usually means the player drawing loses their turn.
+		# If I draw, my turn ends. The NEXT player plays.
+		# So cycle_turn(1).
+		return
+	
+	# Normal Draw
+	distribute_cards(current_hand, 1)
+	
+	# After drawing, check if player can play? 
+	# Usually MauMau allows playing the drawn card if valid.
+	# Or pass immediately?
+	# Implementation: Let them play.
+	# (No cycle_turn here, player must choose to pass or play)
+	
 # Modified to fill hands up to the limit, allowing for pre-seeded debug cards
 func deal_initial_cards() -> void:
 	
@@ -270,48 +311,11 @@ func deal_initial_cards() -> void:
 # --- Debug Helpers ---
 
 func _run_debug_scenarios() -> void:
-	# pass
-	# Example: Give Player 1 (Index 0) a Heart 9
-	# debug_move_card_to_hand(0, "heart_9")
-	# debug_move_card_to_hand(1, "club_A")
-	# debug_move_card_to_hand(0,"heart_9")
-	# debug_move_card_to_hand(0,"club_9")
-	# debug_move_card_to_hand(0,"spade_9")
-	# debug_move_card_to_hand(0,"diamond_9")
-	
-	debug_move_card_to_hand(0, "joker")
-	debug_move_card_to_hand(0, "club_2")
-	
-	debug_set_starting_player(0)
+	# Use new separated Debug Scenarios script
+	var debug_sys = DebugScenarios.new()
+	debug_sys.run_debug_scenarios(self)
 
-func debug_set_starting_player(player_idx: int) -> void:
-	if player_idx < 0 or player_idx >= num_players:
-		printerr("Debug Error: Invalid starting player index ", player_idx)
-		return
-	
-	# Convert 0-based index to 1-based logic used by game
-	current_player = player_idx + 1
-	print("DEBUG: Force starting player to: ", current_player)
-	update_turn_ui()
-
-func debug_move_card_to_hand(player_idx: int, card_name: String) -> void:
-	if player_idx < 0 or player_idx >= hands_array.size():
-		printerr("Debug Error: Invalid player index ", player_idx)
-		return
-		
-	# Find card in deck
-	var target_card: Card = null
-	for card in deck._held_cards:
-		if card.card_name == card_name:
-			target_card = card
-			break
-			
-	if target_card:
-		print("DEBUG: Moving ", card_name, " to Player ", (player_idx + 1))
-		hands_array[player_idx].move_cards([target_card])
-	else:
-		printerr("Debug Error: Card not found in deck: ", card_name)
-			# Add a small delay/tween here if we wanted visuals, but logic is instant for now
+# Inline debug helpers removed. See debug_scenarios.gd
 		
 func populate_deck() -> void:
 	var card_data = card_manager.card_factory.preloaded_cards
@@ -368,7 +372,7 @@ func handle_highlight() -> void:
 
 
 func _on_card_played(card: Card) -> void:
-	print("Brain Function Triggered! Card Played: ", card.card_name, " | Handler Frame: ", Engine.get_process_frames())
+	_print_game_event("Plays Card", card.card_name)
 	log_message("Player %d played %s" % [current_player, card.card_name.replace("_", " ").capitalize()])
 	
 	# Dispatch to specific effect handler
@@ -413,7 +417,10 @@ func _register_card_effects() -> void:
 	# Specific rules by name
 	card_effects["diamond_5"] = _effect_rotate_right_1
 	card_effects["heart_5"] = _effect_rotate_left_2
-	card_effects["joker"] = _effect_joker
+	
+	# Jokers
+	card_effects["joker_red"] = _effect_joker
+	card_effects["joker_black"] = _effect_joker
 	
 	card_effects["club_4"] = _effect_club_4
 	card_effects["spade_4"] = _effect_spade_4
@@ -433,8 +440,10 @@ func _register_card_effects() -> void:
 		card_effects[suit + "_2"] = _effect_play_again
 
 # Default effect: just pass the turn
+# Default effect: just pass the turn
 func _effect_default(_card: Card) -> void:
-	cycle_turn(1)
+	cycle_turn(1, true)
+
 
 # --- Effect Handlers ---
 
@@ -469,13 +478,21 @@ func _effect_skip(_card: Card) -> void:
 	cycle_turn(2)
 
 # 7: Next player draws 2 and is skipped
+# 7: Next player draws 2 (Stackable)
 func _effect_draw_2_skip(_card: Card) -> void:
-	print("Effect: Draw 2 & Skip (7)")
-	log_message("Effect: Next player draws 2 and skips!")
-	var next_player_idx = get_next_player_index(1)
-	var next_hand = hands_array[next_player_idx - 1]
-	distribute_cards(next_hand, 2)
-	cycle_turn(2) # Skip
+	_print_game_event("Effect Triggered", "Stacking 7 (+2)")
+	log_message("Effect: +2 Cards! Stack or Draw!")
+	
+	pending_penalty += 2
+	penalty_type = "7"
+	
+	# Sync failure to pile
+	discard_pile.pending_penalty = pending_penalty
+	discard_pile.penalty_type = penalty_type
+	
+	# Do NOT draw immediate. Do NOT skip immediate.
+	# Pass control to next player to respond.
+	cycle_turn(1, true)
 
 # 9: Last player who played draws 1
 func _effect_draw_last_player(_card: Card) -> void:
@@ -493,11 +510,12 @@ func _effect_reverse(_card: Card) -> void:
 	print("Effect: Reverse (Q)")
 	log_message("Effect: Direction Reversed!")
 	play_direction *= -1
-	cycle_turn(1) # Move to next in new direction
+	play_direction *= -1
+	cycle_turn(1, true) # Move to next in new direction
 	
 # J: Wildcard with Suit Selection
 func _effect_jack(_card: Card) -> void:
-	print("Effect: Jack (Wildcard) - Choosing Suit")
+	_print_game_event("Effect Triggered", "Jack/Joker Suit Selection")
 	log_message("Player %d is choosing a suit..." % current_player)
 	
 	# Block input to prevent other players from playing prematurely
@@ -518,7 +536,7 @@ func _effect_jack(_card: Card) -> void:
 	selector.suit_selected.connect(_on_suit_selected)
 
 func _on_suit_selected(suit: String) -> void:
-	print("Suit Selected: ", suit)
+	_print_game_event("Selection", "Chose Suit: " + suit)
 	log_message("Player %d chose %s!" % [current_player, suit.capitalize()])
 	
 	# 1. Update Discard Pile Active Suit
@@ -568,34 +586,22 @@ func _effect_rotate_left_2(_card: Card) -> void:
 	_rotate_hands_content(-2) # Negative for left/counter-clockwise relative to array
 	cycle_turn(1)
 
-# Joker: Draw 4 + Skip + Choose Suit
+# Joker: Draw 4 + Skip + Choose Suit (Stacking)
 func _effect_joker(_card: Card) -> void:
-	print("Effect: Joker (Apocalypse)")
-	log_message("Joker played! Next +4, Skip, Suit Select!")
+	_print_game_event("Effect Triggered", "Stacking Joker (+4)")
+	log_message("Joker! +4 Cards! Stack or Draw!")
 	
-	# 1. Next player draws 4
-	var next_player_idx = get_next_player_index(1)
-	var next_hand = hands_array[next_player_idx - 1]
-	distribute_cards(next_hand, 4)
+	pending_penalty += 4
+	penalty_type = "joker"
 	
-	# 2. Skip that player (so turn moves to Player+2)
-	# BUT we also need to select a suit. 
-	# Effect Jack does NOT cycle turn immediately. It waits for UI.
-	# We should do the same here.
+	discard_pile.pending_penalty = pending_penalty
+	discard_pile.penalty_type = penalty_type
 	
-	# Pre-calculate the NEXT turn cycle to be +2 (Skip)
-	# But _on_suit_selected cycles by 1.
-	# We can update a flag or just handle it differently.
-	# Easier: Let's reuse logic.
-	# We can override _on_suit_selected behavior? No.
+	# Current player chooses suit naturally via Jack effect UI
+	# After suit selected, it cycles turn by 1 (Next player must respond)
+	# We DO NOT set pending_turn_skip to 2 here anymore.
 	
-	# Let's initiate suit selection first.
 	_effect_jack(_card)
-	
-	# However, _effect_jack calls cycle_turn(1) at the end of selection.
-	# We want cycle_turn(2).
-	# This implies we need a state variable "pending_turn_skip".
-	pending_turn_skip = 2 # Set to 2 so when suit is selected, we skip.
 
 # Club 4: Clears Active Effects (8s, Kings, Queens/Direction)
 # DOES NOT clear Spade 4 Lock.
@@ -607,8 +613,10 @@ func _effect_club_4(_card: Card) -> void:
 	# Clear 8s Masquerade
 	active_effects["eight_black"] = false
 	active_effects["eight_red"] = false
-	discard_pile.active_effect_eight_black = false
 	discard_pile.active_effect_eight_red = false
+	
+	# Note: Club 4 does NOT clear Spade 4 Lock (active_effects["locked"])
+	# So we don't reset discard_pile.active_effect_locked here unless rule changes.
 	
 	# Clear Direction (Queen Effect) - Reset to Clockwise
 	play_direction = 1
@@ -624,6 +632,7 @@ func _effect_spade_4(_card: Card) -> void:
 	print("Effect: LOCK Effects (Spade 4)")
 	log_message("Effects are now LOCKED!")
 	active_effects["locked"] = true
+	discard_pile.active_effect_locked = true # Sync to pile
 	_update_hud_effects()
 	cycle_turn(1)
 
@@ -633,6 +642,7 @@ func _effect_red_4(_card: Card) -> void:
 	if active_effects["locked"]:
 		log_message("Effects are now UNLOCKED!")
 		active_effects["locked"] = false
+		discard_pile.active_effect_locked = false # Sync to pile
 	else:
 		log_message("Red 4 played (Nothing locked).")
 	_update_hud_effects()
@@ -896,7 +906,7 @@ func update_player_stats() -> void:
 
 func _on_pass_turn_pressed() -> void:
 	print("Pass Turn Pressed")
-	cycle_turn()
+	cycle_turn(1, false)
 
 func _update_hud_effects() -> void:
 	if effect_status_bar:
