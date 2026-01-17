@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://kmn6ipbi8joy"
-path="res://.godot/imported/queen_arrow.png-71f8ac40fffbe55f23936814b4861762.ctex"
+uid="uid://mdqw0rxxi4h3"
+path="res://.godot/imported/die 2.png-28ea05a5e5ed572b9b03820506d2ab7d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Maumau/assets/images/cards/queen_arrow.png"
-dest_files=["res://.godot/imported/queen_arrow.png-71f8ac40fffbe55f23936814b4861762.ctex"]
+source_file="res://Maumau/assets/images/dice/die 2.png"
+dest_files=["res://.godot/imported/die 2.png-28ea05a5e5ed572b9b03820506d2ab7d.ctex"]
 
 [params]
 

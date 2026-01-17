@@ -2,12 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dv1r13yjw21ep"
-valid=false
+uid="uid://cj62c10f6wjll"
+path="res://.godot/imported/die.png-5e15f89b2befdcababc3695ddfd77266.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
-source_file="res://Maumau/assets/images/cards/queen_arrow_final.png"
+source_file="res://Maumau/assets/images/dice/die.png"
+dest_files=["res://.godot/imported/die.png-5e15f89b2befdcababc3695ddfd77266.ctex"]
 
 [params]
 

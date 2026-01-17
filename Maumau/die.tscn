@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3 uid="uid://c5rrposv6dudi"]
+
+[ext_resource type="Texture2D" uid="uid://cj62c10f6wjll" path="res://Maumau/assets/images/dice/die.png" id="1_tex"]
+[ext_resource type="Script" uid="uid://bn8yfnixvv12c" path="res://Maumau/die.gd" id="2_scr"]
+
+[node name="Die" type="Sprite2D"]
+texture = ExtResource("1_tex")
+hframes = 3
+vframes = 3
+script = ExtResource("2_scr")

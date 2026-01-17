@@ -15,6 +15,7 @@ var hands_array: Array[Hand] = [];
 # UI Scenes for Effects
 var suit_selector_scene: PackedScene = preload("res://Maumau/suit_selector.tscn")
 var speech_bubble_scene: PackedScene = preload("res://Maumau/speech_bubble.tscn")
+var die_scene: PackedScene = preload("res://Maumau/die.tscn")
 var simon_popup: Control
 
 var player_labels: Array[Label] = []
@@ -1404,3 +1405,63 @@ func _get_hand_transform(player_idx: int, total_players: int, center: Vector2, s
 		result.face_up = (player_idx == 0)
 
 	return result
+func _input(event: InputEvent) -> void:
+	if not event.is_pressed(): return
+	if not event is InputEventKey: return
+	
+	# Debug: Roll Die with 'D' (All Players)
+	if event.keycode == KEY_D:
+		log_message("Debug: Rolling dice for ALL players!")
+		for p_idx in range(1, num_players + 1):
+			var val = randi() % 6 + 1
+			show_dice_roll(p_idx, val)
+			
+	# Debug: Roll Die for specific player (1-9)
+	elif event.keycode >= KEY_0 and event.keycode <= KEY_9:
+		var p_idx = event.keycode - KEY_0
+		if p_idx >= 1 and p_idx <= num_players:
+			log_message("Debug: Rolling die for Player %d" % p_idx)
+			var val = randi() % 6 + 1
+			show_dice_roll(p_idx, val)
+
+func show_dice_roll(player_idx: int, value: int) -> void:
+	if not die_scene: return
+	
+	# Instantiate transient die
+	var die = die_scene.instantiate()
+	if not die: return
+	
+	# Add to HUD
+	if hud_layer:
+		hud_layer.add_child(die)
+		die.scale = Vector2(0.4, 0.4) # Small (20% of previous 2.0)
+	else:
+		return
+	
+	print("DEBUG: Rolling Die for Player %d -> %d" % [player_idx, value])
+	
+	# Position: 20% closer to center from Hand
+	var center = get_viewport().get_visible_rect().get_center()
+	
+	if player_idx >= 1 and player_idx <= hands_array.size():
+		var hand = hands_array[player_idx - 1]
+		var hand_pos = hand.get_global_transform_with_canvas().origin
+		
+		var to_center = center - hand_pos
+		var base_pos = hand_pos + (to_center * 0.2)
+		
+		# Add jitter
+		var offset = Vector2(randf_range(-40, 40), randf_range(-40, 40))
+		die.global_position = base_pos + offset
+	else:
+		# Fallback for spectator or unknown
+		die.global_position = center
+	
+	die.rotation = 0 # Rotation handled by script but reset here
+	
+	# Call roll method on Die script
+	if die.has_method("roll"):
+		die.roll(value)
+		
+	# Cleanup after 4 seconds
+	get_tree().create_timer(4.0).timeout.connect(func(): die.queue_free())
