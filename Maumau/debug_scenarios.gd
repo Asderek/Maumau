@@ -16,7 +16,9 @@ func run_debug_scenarios(manager: Node) -> void:
 	# Goal: P1 plays 7 (+2), P2 plays 7 (+4), P3 draws.
 	#_scenario_stacking_7s(manager)
 	
-	_scenario_dobrando(manager)
+	#_scenario_dobrando(manager)
+	
+	_scenario_666(manager)
 
 
 # --- Scenario Definitions ---
@@ -38,6 +40,23 @@ func _scenario_dobrando(manager: Node) -> void:
 	
 	_move_card_to_hand(manager, 0, "club_5")
 	_move_card_to_hand(manager, 3, "club_5")
+	
+	_set_starting_player(manager, 0)
+
+func _scenario_666(manager: Node) -> void:
+	# Ensure Discard allows Club 6 (e.g. Club 3)
+	_move_card_to_discard(manager, "club_3")
+	
+	# P1: Club 6
+	_move_card_to_hand(manager, 0, "club_6")
+	
+	# P2: Diamond 6
+	if manager.hands_array.size() > 1:
+		_move_card_to_hand(manager, 1, "diamond_6")
+		
+	# P3: Spade 6
+	if manager.hands_array.size() > 2:
+		_move_card_to_hand(manager, 2, "spade_6")
 	
 	_set_starting_player(manager, 0)
 

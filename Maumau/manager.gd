@@ -178,6 +178,8 @@ var play_direction: int = 1 # 1 for clockwise, -1 for counter-clockwise
 var last_player_who_played: int = -1
 # History of last 3 plays: [{ "card_name": String, "player": int, "card_ref": Card }]
 var play_history: Array = [] 
+# Rule 666 State
+var devil_awakened: bool = false
 var pending_turn_skip: int = 1 # Default to 1 (Next player). Joker sets this to 2 (Skip).
 var active_effects: Dictionary = {
 	"locked": false,          # Spade 4
@@ -458,7 +460,7 @@ func _register_card_effects() -> void:
 	
 	# Generic rules by value
 	var suits = ["club", "diamond", "heart", "spade"]
-	var special_values = ["A", "7", "9", "Q", "J"]
+	var special_values = ["A", "7", "9", "Q", "J", "6"]
 	
 	for suit in suits:
 		for value in special_values:
@@ -474,6 +476,7 @@ func _register_card_effects() -> void:
 				"9": card_effects[card_name] = _effect_draw_last_player
 				"Q": card_effects[card_name] = _effect_reverse
 				"J": card_effects[card_name] = _effect_jack
+				"6": card_effects[card_name] = _effect_six
 				
 	# Specific rules by name
 	if GameGlobals.is_rule_active("5"):
@@ -627,6 +630,83 @@ func _effect_draw_last_player(_card: Card) -> void:
 	distribute_cards(target_hand, amount_to_draw)
 	
 	cycle_turn(1)
+
+# 6: Rule 666 (Mark of the Beast)
+func _effect_six(_card: Card) -> void:
+	print("Effect: Check 666")
+	
+	var beast_summoned = false
+	var authors = {}
+	if play_history.size() >= 3:
+		# Check last 3 cards
+		var h1 = play_history[play_history.size() - 1]
+		var h2 = play_history[play_history.size() - 2]
+		var h3 = play_history[play_history.size() - 3]
+		
+		var c1 = h1.card_name
+		var c2 = h2.card_name
+		var c3 = h3.card_name
+		
+		if "6" in c1 and "6" in c2 and "6" in c3:
+			beast_summoned = true
+			authors[h1.player] = true
+			authors[h2.player] = true
+			authors[h3.player] = true
+			
+	if beast_summoned:
+		_print_game_event("Effect Triggered", "666 COMPLETED!")
+		
+		# --- Phase 2: The Demon is Summoned (Game Over) ---
+		if devil_awakened:
+			log_message("!!! 666 - THE DEMON IS SUMMONED !!!")
+			log_message("!!! GAME OVER - THE DEMON WINS !!!")
+			#if Alert: Alert.text = "GAME OVER: DEMON WINS"
+			# Stop game state/input?
+			# For now, just a major log event.
+			return
+			
+		# --- Phase 1: The Devil Awakens ---
+		log_message("!!! 666 - THE DEVIL AWAKENS !!!")
+		devil_awakened = true
+		
+		# 1. Remove Top 3 Cards (The 6s) from the game
+		discard_pile.remove_top_cards(3)
+		log_message("The 3 Sixes are consumed by the void...")
+		
+		# 2. Identify Victims
+		var victims = []
+		for p_idx in range(1, num_players + 1):
+			if not authors.has(p_idx):
+				victims.append(hands_array[p_idx - 1])
+
+		# Fallback: Everyone suffers if all participated
+		if victims.is_empty():
+			log_message("All are sinners! The spoils effectively vanish (or go to everyone).")
+			# User said: "Distributes to Victims". If no victims, logic implies fallback or nothing.
+			# Let's fallback to everyone to keep game moving / punishment real.
+			victims = hands_array.duplicate()
+			
+		# 3. Distribute Remaining Pile
+		var penalty_pool = discard_pile.collect_all_cards()
+		
+		if penalty_pool.is_empty():
+			log_message("The void was hungry... no other cards to distribute.")
+		else:
+			penalty_pool.shuffle()
+			log_message("The Beast distributes %d remaining cards!" % penalty_pool.size())
+			
+			var v_idx = 0
+			for card in penalty_pool:
+				var victim_hand = victims[v_idx % victims.size()]
+				victim_hand.move_cards([card])
+				v_idx += 1
+				
+		cycle_turn(1) 
+		# Pile is now empty. Next player plays on empty pile (Any card valid).
+	else:
+		# Normal 6
+		log_message("Player %d played a 6..." % current_player)
+		cycle_turn(1)
 
 # Q: Reverse direction
 func _effect_reverse(_card: Card) -> void:

@@ -204,3 +204,45 @@ func _is_jump_in_valid(card: Card, top_card: Card) -> bool:
 		return true
 		
 	return false
+
+
+# Collect cards for Rule 666 Penalty
+# Removes all cards from the pile EXCEPT the top 'keep_count' cards.
+# Returns the removed cards as an Array.
+func collect_penalty_cards(keep_count: int = 1) -> Array[Card]:
+	if _held_cards.size() <= keep_count:
+		return []
+		
+	var pool: Array[Card] = []
+	# The top cards are at the END of the array
+	var cards_to_remove_count = _held_cards.size() - keep_count
+	
+	# Slice the bottom cards (0 to size-keep)
+	var cards_to_take = _held_cards.slice(0, cards_to_remove_count)
+	
+	for card in cards_to_take:
+		remove_card(card)
+		pool.append(card)
+		
+	return pool
+
+# Removes the top 'count' cards from the pile and deletes them (removes from game).
+func remove_top_cards(count: int) -> void:
+	if _held_cards.is_empty(): return
+	
+	var actual_count = min(count, _held_cards.size())
+	# Top cards are at the END
+	for i in range(actual_count):
+		var card = _held_cards.pop_back()
+		# Remove visually from container
+		remove_child(card) # Or proper removal logic that card logic handles? 
+		# Card.gd typically handles input events. 
+		# If we just queue_free, it's gone.
+		card.queue_free()
+		
+	# Re-organize pile visual?
+	_update_target_positions() 
+
+# Collect ALL cards from the pile (Empty the pile)
+func collect_all_cards() -> Array[Card]:
+	return collect_penalty_cards(0)
